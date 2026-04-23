@@ -151,13 +151,17 @@ class RangeSlider(tk.Frame):
             self.callback(self.valor_min, self.valor_max)
 
 
-def convertir_imagen_para_tkinter(imagen_opencv, ancho_maximo=300, alto_maximo=240):
+def convertir_imagen_para_tkinter(imagen_opencv, ancho_maximo=300, alto_maximo=240,
+                                  expandir=False):
     """
     Convierte una imagen de OpenCV (numpy BGR o escala de grises)
     a un PhotoImage que tkinter puede mostrar en un Label.
 
     Redimensiona proporcionalmente para que la imagen quepa dentro del
-    cuadro de ancho_maximo × alto_maximo píxeles, sin agrandarla nunca.
+    cuadro de ancho_maximo × alto_maximo píxeles.
+
+    Si expandir=True, también agranda imágenes pequeñas para que ocupen
+    mejor el espacio visible del contenedor.
 
     Parámetros:
         imagen_opencv -> matriz numpy 2D (grises) o 3D (BGR)
@@ -181,15 +185,14 @@ def convertir_imagen_para_tkinter(imagen_opencv, ancho_maximo=300, alto_maximo=2
     ancho_original, alto_original = imagen_pil.size
 
     # Calculamos el factor de escala que hace que la imagen quepa en ambas dimensiones
-    factor_escala = min(
-        ancho_maximo / ancho_original,
-        alto_maximo  / alto_original,
-        1.0   # nunca agrandamos la imagen, solo la encogemos
-    )
+    factor_escala = min(ancho_maximo / ancho_original, alto_maximo / alto_original)
+    if not expandir:
+        factor_escala = min(factor_escala, 1.0)
 
-    if factor_escala < 1.0:
+    if factor_escala != 1.0:
         nuevo_ancho = max(1, int(ancho_original * factor_escala))
         nuevo_alto  = max(1, int(alto_original  * factor_escala))
-        imagen_pil  = imagen_pil.resize((nuevo_ancho, nuevo_alto), Image.LANCZOS)
+        resample = Image.NEAREST if factor_escala > 1.0 else Image.LANCZOS
+        imagen_pil  = imagen_pil.resize((nuevo_ancho, nuevo_alto), resample)
 
     return ImageTk.PhotoImage(imagen_pil)

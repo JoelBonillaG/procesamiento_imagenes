@@ -56,14 +56,14 @@ def comprimir_por_bloques(imagen_grises, tamano_bloque):
     y reemplaza cada bloque por el PROMEDIO de los píxeles que contiene.
 
     Esto es una forma simple de compresión con pérdida: la imagen pierde
-    detalle pero mantiene su forma general.
+    detalle y también reduce su resolución real.
 
     Parámetros:
         imagen_grises  -> matriz 2D en escala de grises
         tamano_bloque  -> entero, tamaño del lado del bloque (ej: 2, 4, 8)
 
     Retorna:
-        imagen_comprimida con el mismo tamaño que la original
+        imagen_comprimida con menor resolución que la original
     """
 
     if imagen_grises is None:
@@ -76,12 +76,16 @@ def comprimir_por_bloques(imagen_grises, tamano_bloque):
     # Obtenemos las dimensiones de la imagen
     alto_imagen, ancho_imagen = imagen_grises.shape
 
-    # Creamos una imagen vacía del mismo tamaño para ir guardando el resultado
-    imagen_comprimida = np.zeros_like(imagen_grises)
+    # La salida tendrá un solo píxel por bloque.
+    alto_salida = (alto_imagen + tamano_bloque - 1) // tamano_bloque
+    ancho_salida = (ancho_imagen + tamano_bloque - 1) // tamano_bloque
+    imagen_comprimida = np.zeros((alto_salida, ancho_salida), dtype=np.uint8)
 
     # Recorremos la imagen saltando de "tamano_bloque" en "tamano_bloque"
     # Tanto en filas como en columnas.
+    fila_salida = 0
     for fila_inicial in range(0, alto_imagen, tamano_bloque):
+        columna_salida = 0
         for columna_inicial in range(0, ancho_imagen, tamano_bloque):
 
             # Calculamos los límites del bloque.
@@ -97,8 +101,10 @@ def comprimir_por_bloques(imagen_grises, tamano_bloque):
             # Calculamos el promedio de los píxeles del bloque
             promedio_del_bloque = int(np.mean(bloque_actual))
 
-            # Asignamos ese promedio a todos los píxeles del bloque en la imagen final
-            imagen_comprimida[fila_inicial:fila_final,
-                              columna_inicial:columna_final] = promedio_del_bloque
+            # Guardamos un solo valor por bloque en la imagen final
+            imagen_comprimida[fila_salida, columna_salida] = promedio_del_bloque
+            columna_salida += 1
+
+        fila_salida += 1
 
     return imagen_comprimida

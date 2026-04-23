@@ -195,17 +195,10 @@ class VentanaPrincipal:
         p = self._pagina1
 
         ctk.CTkLabel(p,
-                     text="Paso 1 de 2 — Normalización por Canal RGB",
+                     text="Normalización",
                      font=ctk.CTkFont(size=19, weight="bold"),
                      text_color=C_TITULO).pack(pady=(10, 1))
 
-        ctk.CTkLabel(p,
-                     text=(
-                         "Original arriba · Normalizado abajo.  "
-                         "Arrastra el slider de cada canal para ajustar el rango."
-                     ),
-                     font=ctk.CTkFont(size=12),
-                     text_color=C_SUBTITULO).pack(pady=(0, 8))
 
         # ── Fila de 4 columnas ────────────────────────────────────────────
         fila = ctk.CTkFrame(p, fg_color=C_FONDO)
@@ -239,7 +232,6 @@ class VentanaPrincipal:
                            corner_radius=10, border_color=C_BORDE, border_width=1)
         col.pack(side="left", padx=5, pady=6, anchor="n")
 
-        # Imagen original (referencia fija)
         ctk.CTkLabel(col, text="Imagen Original",
                      font=ctk.CTkFont(size=13, weight="bold"),
                      text_color=C_TITULO).pack(pady=(8, 2))
@@ -290,6 +282,7 @@ class VentanaPrincipal:
         ctk.CTkLabel(col, text="ORIGINAL",
                      font=ctk.CTkFont(size=10, weight="bold"), text_color=C_SUBTITULO).pack()
 
+
         fila_orig = tk.Frame(col, bg=C_TARJETA)
         fila_orig.pack(padx=10, pady=(3, 6))
 
@@ -323,6 +316,7 @@ class VentanaPrincipal:
         ctk.CTkLabel(col, text="NORMALIZADO",
                      font=ctk.CTkFont(size=10, weight="bold"), text_color=color).pack()
 
+
         fila_norm = tk.Frame(col, bg=C_TARJETA)
         fila_norm.pack(padx=10, pady=(3, 6))
 
@@ -350,13 +344,9 @@ class VentanaPrincipal:
         p = self._pagina2
 
         ctk.CTkLabel(p,
-                     text="Paso 2 de 2 — Compresión por Bloques y Binarización",
+                     text="Compresión y Binarización",
                      font=ctk.CTkFont(size=15, weight="bold"),
                      text_color=C_TITULO).pack(pady=(14, 2))
-        ctk.CTkLabel(p,
-                     text="Se aplica sobre la imagen ya normalizada del paso anterior.",
-                     font=ctk.CTkFont(size=10),
-                     text_color=C_SUBTITULO).pack(pady=(0, 12))
 
         # ── Tres imágenes ─────────────────────────────────────────────────
         fila_imgs = ctk.CTkFrame(p, fg_color=C_FONDO)
@@ -381,6 +371,7 @@ class VentanaPrincipal:
             lbl_info.pack(pady=(2, 8))
             setattr(self, attr_dim, lbl_info)
 
+
         # ── Panel de controles ────────────────────────────────────────────
         panel = ctk.CTkFrame(p, fg_color=C_TARJETA,
                               corner_radius=10, border_color=C_BORDE, border_width=1)
@@ -394,7 +385,7 @@ class VentanaPrincipal:
         # Tamaño de bloque
         sb = ctk.CTkFrame(panel, fg_color=C_TARJETA)
         sb.pack(anchor="w", padx=14, pady=(8, 4))
-        ctk.CTkLabel(sb, text="Tamaño de bloque (promedio NxN):",
+        ctk.CTkLabel(sb, text="Tamaño de bloque (promedio NxN, reduce resolución):",
                      font=ctk.CTkFont(size=11, weight="bold"),
                      text_color=C_TITULO).pack(anchor="w", pady=(0, 4))
 
@@ -581,10 +572,28 @@ class VentanaPrincipal:
         gris = convertir_a_grises(self.imagen_recombinada)
         comp = comprimir_por_bloques(gris, self.bloque_actual)
         self.imagen_comprimida = comp
-        h, w = comp.shape[:2]
-        self._mostrar(self._lbl_p2_comp, comp, "p2_comp", ANCHO_P2, ALTO_P2)
+        alto_original, ancho_original = gris.shape[:2]
+        alto_comp, ancho_comp = comp.shape[:2]
+        pixeles_originales = gris.size
+        pixeles_comprimidos = comp.size
+        porcentaje_restante = (
+            (pixeles_comprimidos / pixeles_originales) * 100
+            if pixeles_originales else 0.0
+        )
+        porcentaje_reduccion = 100.0 - porcentaje_restante
+        relacion_compresion = (
+            pixeles_originales / pixeles_comprimidos
+            if pixeles_comprimidos else 0.0
+        )
+
+        self._mostrar(self._lbl_p2_comp, comp, "p2_comp", ANCHO_P2, ALTO_P2, expandir=True)
         self._lbl_dim_comp.configure(
-            text=f"Bloque {self.bloque_actual}×{self.bloque_actual}  |  {w}×{h} px")
+            text=(
+                f"Bloque {self.bloque_actual}x{self.bloque_actual}  |  "
+                f"{ancho_original}x{alto_original} px -> {ancho_comp}x{alto_comp} px  "
+                f"| Reduccion: {porcentaje_reduccion:.1f}%  "
+                f"| Relacion: {relacion_compresion:.1f}:1"
+            ))
         self._aplicar_threshold_solo()
 
     def _aplicar_threshold_solo(self):
@@ -593,7 +602,7 @@ class VentanaPrincipal:
         binaria, media, umbral_usado = aplicar_threshold(
             self.imagen_comprimida, self.umbral_actual)
         self.imagen_binaria = binaria
-        self._mostrar(self._lbl_p2_bin, binaria, "p2_bin", ANCHO_P2, ALTO_P2)
+        self._mostrar(self._lbl_p2_bin, binaria, "p2_bin", ANCHO_P2, ALTO_P2, expandir=True)
         self._lbl_info_bin.configure(
             text=f"Umbral: {umbral_usado}  |  Media: {media:.1f}")
         self._lbl_media_ref.configure(
@@ -645,11 +654,13 @@ class VentanaPrincipal:
         lbl.pack(expand=True)
         return lbl
 
-    def _mostrar(self, label, imagen_numpy, clave, ancho_max, alto_max):
+    def _mostrar(self, label, imagen_numpy, clave, ancho_max, alto_max, expandir=False):
         """Convierte numpy → PhotoImage y lo asigna al Label."""
         if imagen_numpy is None:
             return
-        img_tk = convertir_imagen_para_tkinter(imagen_numpy, ancho_max, alto_max)
+        img_tk = convertir_imagen_para_tkinter(
+            imagen_numpy, ancho_max, alto_max, expandir=expandir
+        )
         if img_tk is None:
             return
         self.refs[clave] = img_tk
@@ -691,3 +702,4 @@ class VentanaPrincipal:
         ax.bar(range(256), frecuencias, color=color, width=1.0, alpha=0.85)
         ax.grid(True, alpha=0.10, color="white", linewidth=0.4)
         canvas_mpl.draw_idle()
+
