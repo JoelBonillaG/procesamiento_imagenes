@@ -1,47 +1,54 @@
 # ============================================================
 # Módulo: threshold.py
 # ============================================================
-# Aplica una "binarización" (thresholding) a la imagen comprimida.
+# Binarización de imagen por umbral (threshold).
 #
-# Un threshold convierte una imagen en escala de grises en una imagen
-# con solo dos valores: 0 (negro) y 255 (blanco).
-# Esto es útil como preprocesamiento para Machine Learning cuando
-# solo nos interesa la forma de los objetos y no los detalles de color.
+# Regla:
+#   pixel >= umbral  → 255 (blanco)
+#   pixel <  umbral  → 0   (negro)
 #
-# Regla aplicada:
-#   - si pixel >= media de la imagen -> se pone en 255 (blanco)
-#   - si pixel <  media de la imagen -> se pone en 0   (negro)
+# El umbral puede ser fijo (definido por el usuario con un slider)
+# o automático (se usa la media de la imagen si no se pasa ninguno).
+#
+# Esta técnica simplifica la imagen para que un modelo de ML
+# solo trabaje con la forma de los objetos (sin tonos de gris).
 
 import numpy as np
 
 
-def aplicar_threshold(imagen_comprimida):
+def aplicar_threshold(imagen_comprimida, umbral=None):
     """
-    Binariza la imagen usando la media de sus propios píxeles como umbral.
+    Binariza la imagen usando el umbral indicado.
 
     Parámetros:
         imagen_comprimida -> matriz 2D en escala de grises (uint8)
+        umbral            -> valor entre 0 y 255, o None para usar la media
 
     Retorna:
-        tupla (imagen_binaria, valor_media)
-            - imagen_binaria: matriz 2D uint8 con solo valores 0 y 255
-            - valor_media: media calculada (para mostrarla en la interfaz)
+        tupla (imagen_binaria, media_calculada, umbral_usado)
+            - imagen_binaria  : matriz 2D uint8 con solo valores 0 ó 255
+            - media_calculada : media de la imagen (referencia informativa)
+            - umbral_usado    : umbral que se aplicó efectivamente
     """
 
-    # Validación básica
     if imagen_comprimida is None:
-        return None, 0
+        return None, 0.0, 0
 
-    # Paso 1: calcular la media de todos los píxeles de la imagen
-    # Esta media será nuestro umbral (threshold)
-    valor_media = np.mean(imagen_comprimida)
+    # Siempre calculamos la media como referencia informativa para el usuario
+    media_calculada = float(np.mean(imagen_comprimida))
 
-    # Paso 2: aplicar la regla pixel >= media -> 255, pixel < media -> 0
-    # np.where funciona como un if-else aplicado a toda la matriz a la vez
+    # Si no se especificó umbral, usamos la media de la imagen
+    if umbral is None:
+        umbral_usado = int(round(media_calculada))
+    else:
+        umbral_usado = int(umbral)
+
+    # Aplicamos la binarización:
+    # np.where recorre toda la matriz a la vez (más eficiente que un bucle)
     imagen_binaria = np.where(
-        imagen_comprimida >= valor_media,
-        255,
-        0
+        imagen_comprimida >= umbral_usado,
+        255,   # blanco: el píxel está por encima del umbral
+        0      # negro:  el píxel está por debajo del umbral
     ).astype(np.uint8)
 
-    return imagen_binaria, valor_media
+    return imagen_binaria, media_calculada, umbral_usado

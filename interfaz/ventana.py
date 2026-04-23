@@ -1,76 +1,83 @@
 # ============================================================
 # Módulo: ventana.py
 # ============================================================
-# Clase principal de la interfaz. Organiza la ventana en dos páginas
-# con navegación por migas de pan (breadcrumb):
+# Ventana principal con customtkinter (tema oscuro moderno).
 #
-#   PÁGINA 1 - Normalización:
-#     Fila superior: Imagen original | Canal R | Canal G | Canal B
-#                    (imagen en escala de grises + histograma + slider por canal)
-#     Fila inferior: Imagen recombinada | R' | G' | B'
-#                    (imagen normalizada + histograma por canal)
+# PÁGINA 1 — Normalización por Canal RGB:
+#   Cuatro columnas: [Imagen Original] [Canal R] [Canal G] [Canal B]
+#   Cada canal muestra:
+#     - Imagen en escala de grises (actualizada en tiempo real)
+#     - Curva interactiva estilo Levels con histograma de fondo
+#     - Valores Min / Max actuales
+#     - Botón "Limpiar" para resetear solo ese canal
+#   Debajo: imagen recombinada + canales normalizados con histogramas (eje Y fijo)
 #
-#   PÁGINA 2 - Compresión y Threshold:
-#     Imagen original arriba (previsualización)
-#     Selector de tamaño de bloque
-#     Imagen comprimida (resultado)
-#     Imagen binaria (threshold)
+# PÁGINA 2 — Compresión y Binarización:
+#   Tres imágenes lado a lado: Normalizada | Comprimida | Binaria
+#   Panel de controles:
+#     - Radio buttons para tamaño de bloque (2×2 / 4×4 / 8×8 / 16×16)
+#     - Slider para el umbral de binarización (0–255)
+#     - Media de la imagen mostrada como referencia
+#
+# Proceso secuencial:
+#   Cargar → Normalizar por canal → Recombinar → Comprimir → Binarizar
 
 import os
+import cv2
+import numpy as np
 import tkinter as tk
 from tkinter import filedialog, messagebox
 
-import cv2
+import customtkinter as ctk
+from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
-# Módulos de procesamiento
-from procesamiento.canales import separar_canales, unir_canales
-from procesamiento.histograma import calcular_histograma
+# Módulos de procesamiento de imagen
+from procesamiento.canales      import separar_canales, unir_canales
+from procesamiento.histograma   import calcular_histograma
 from procesamiento.redistribuir import normalizar_canal
-from procesamiento.compresion import convertir_a_grises, comprimir_por_bloques
-from procesamiento.threshold import aplicar_threshold
+from procesamiento.compresion   import convertir_a_grises, comprimir_por_bloques
+from procesamiento.threshold    import aplicar_threshold
 
 # Componentes de la interfaz
-from interfaz.componentes import (
-    convertir_imagen_para_tkinter,
-    crear_figura_histograma,
-    dibujar_histograma,
-    MarcoScrollable,
-    RangeSlider,
-)
+from interfaz.componentes import convertir_imagen_para_tkinter
+from interfaz.curva_canal  import CurvaCanal
 
 
-# ============================================================
-# Paleta de colores
-# ============================================================
-COLOR_FONDO = "#f0f2f5"
-COLOR_TARJETA = "#ffffff"
-COLOR_PLACEHOLDER = "#f7f8fa"
-COLOR_BORDE = "#dde1e7"
-COLOR_TITULO = "#1a2332"
-COLOR_SUBTITULO = "#4a5568"
-COLOR_TEXTO_GRIS = "#8a9ab0"
+# ── Paleta de colores ──────────────────────────────────────────────────────
+C_FONDO       = "#0f1117"   # fondo general de la ventana
+C_TARJETA     = "#1a1d27"   # fondo de las tarjetas / secciones
+C_BORDE       = "#2d3152"   # borde sutil entre elementos
+C_TITULO      = "#e2e8f0"   # texto principal blanco-azulado
+C_SUBTITULO   = "#8892a4"   # texto secundario gris
+C_PLACEHOLDER = "#141720"   # fondo de cuadros de imagen vacíos
+C_DARK_AX     = "#141720"   # fondo de ejes de matplotlib
+C_TICK        = "#5a6478"   # color de números en ejes matplotlib
+C_SPINE       = "#2d3152"   # color de bordes de ejes matplotlib
 
-COLOR_BOTON_CARGAR = "#2563eb"
-COLOR_BOTON_RESET = "#dc7420"
-COLOR_BOTON_GUARDAR = "#16a34a"
+C_AZUL        = "#3b82f6"   # azul principal (botones de acción)
+C_AZUL_HOVER  = "#2563eb"
+C_VERDE       = "#16a34a"   # verde para guardar
+C_VERDE_HOVER = "#15803d"
+C_GRIS_BTN    = "#374151"   # gris para botones secundarios
+C_GRIS_HOVER  = "#4b5563"
 
-COLOR_NAV_ACTIVO = "#2563eb"
-COLOR_NAV_INACTIVO = COLOR_TARJETA
+# Color por canal de color
+COLOR_CANAL  = {"R": "#ef4444", "G": "#22c55e", "B": "#3b82f6"}
+NOMBRE_CANAL = {"R": "Canal R — Rojo", "G": "Canal G — Verde", "B": "Canal B — Azul"}
 
-COLOR_CANAL_ROJO = "#dc2626"
-COLOR_CANAL_VERDE = "#16a34a"
-COLOR_CANAL_AZUL = "#2563eb"
+# ── Tamaños de imágenes ────────────────────────────────────────────────────
+ANCHO_ORIG  = 290   # imagen original y recombinada (página 1)
+ALTO_ORIG   = 215
 
-# Tamaños de imagen para los contenedores fijos
-ANCHO_IMG_GRANDE = 340
-ALTO_IMG_GRANDE = 260
+ANCHO_CANAL = 280   # imagen de canal sobre la curva (actualización en tiempo real)
+ALTO_CANAL  = 200
 
-ANCHO_IMG_CANAL = 270
-ALTO_IMG_CANAL = 195
+ANCHO_NORM  = 380   # imagen canal normalizado (sección inferior página 1)
+ALTO_NORM   = 250
 
-ANCHO_IMG_RESULTADO = 480
-ALTO_IMG_RESULTADO = 350
+ANCHO_P2    = 400   # imágenes en página 2
+ALTO_P2     = 295
 
 
 # ============================================================
@@ -78,703 +85,854 @@ ALTO_IMG_RESULTADO = 350
 # ============================================================
 
 class VentanaPrincipal:
+    """
+    Controlador principal de la interfaz gráfica.
+    Gestiona el estado de la aplicación y coordina las dos páginas.
+    """
 
-    def __init__(self, ventana_raiz):
-        self.ventana_raiz = ventana_raiz
-        self.ventana_raiz.configure(bg=COLOR_FONDO)
+    def __init__(self, raiz):
+        self.raiz = raiz
+        self.raiz.configure(bg=C_FONDO)
 
-        # --- Imágenes en cada etapa ---
-        self.imagen_original = None
-        self.canal_rojo_original = None
-        self.canal_verde_original = None
-        self.canal_azul_original = None
-        self.canal_rojo_normalizado = None
-        self.canal_verde_normalizado = None
-        self.canal_azul_normalizado = None
+        # ── Estado de la aplicación ───────────────────────────────────────
+        self.imagen_original    = None   # imagen BGR cargada con cv2.imread
+        self.canales_orig       = {"R": None, "G": None, "B": None}
+        self.canales_norm       = {"R": None, "G": None, "B": None}
         self.imagen_recombinada = None
-        self.imagen_en_grises = None
-        self.imagen_comprimida = None
-        self.imagen_binaria = None
+        self.imagen_comprimida  = None
+        self.imagen_binaria     = None
 
-        # Guardamos las referencias a PhotoImage para que Python no las elimine
-        self.referencias_imagenes_tk = {}
+        # Máximo de conteo en los histogramas originales.
+        # Se usa para que el eje Y de los histogramas normalizados sea FIJO,
+        # lo que permite comparar visualmente la redistribución de píxeles.
+        self.y_max_hist = 1
 
-        self.tamano_bloque_seleccionado = tk.IntVar(value=4)
+        self.umbral_actual = 128   # valor del slider de threshold
+        self.bloque_actual = 2     # tamaño de bloque de compresión
 
-        self._construir_interfaz()
+        # Guardamos referencias a los PhotoImage para que Python no los elimine
+        # (sin esto las imágenes desaparecen aunque el Label las esté mostrando)
+        self.refs = {}
 
-    # ================================================================
-    # CONSTRUCCIÓN GENERAL
-    # ================================================================
+        # ── Widgets de canal (se llenan en _construir_pagina1) ────────────
+        self._lbl_canal_top  = {}   # imagen de canal sobre la curva (en tiempo real)
+        self._curvas         = {}   # CurvaCanal interactiva por canal
+        self._lbl_minmax     = {}   # etiqueta "Min: X   Max: Y"
+        self._lbl_canal_norm = {}   # imagen canal normalizado (sección inferior)
+        self._ax_hist_norm   = {}   # eje del histograma normalizado
+        self._cv_hist_norm   = {}   # canvas (widget) del histograma normalizado
 
-    def _construir_interfaz(self):
-        # Encabezado fijo (no hace scroll)
-        self._construir_encabezado()
+        # ── Construir la interfaz completa ────────────────────────────────
+        self._construir_ui()
 
-        # Área de páginas (ocupa el resto, hace scroll internamente)
-        self.contenedor_paginas = tk.Frame(self.ventana_raiz, bg=COLOR_FONDO)
-        self.contenedor_paginas.pack(fill="both", expand=True)
+    # ═══════════════════════════════════════════════════════════════════════
+    # CONSTRUCCIÓN DE LA INTERFAZ
+    # ═══════════════════════════════════════════════════════════════════════
 
-        # Construimos cada página y las guardamos en MarcoScrollable
-        self.pagina_normalizacion = MarcoScrollable(
-            self.contenedor_paginas, color_fondo=COLOR_FONDO
-        )
-        self.pagina_compresion = MarcoScrollable(
-            self.contenedor_paginas, color_fondo=COLOR_FONDO
-        )
+    def _construir_ui(self):
+        # Barra de navegación fija (no entra en el scroll)
+        self._construir_barra_nav()
 
-        self._construir_pagina_normalizacion(
-            self.pagina_normalizacion.contenido_interno
-        )
-        self._construir_pagina_compresion(
-            self.pagina_compresion.contenido_interno
-        )
+        # Contenedor donde se intercambian las dos páginas
+        self._contenedor = ctk.CTkFrame(self.raiz, fg_color=C_FONDO)
+        self._contenedor.pack(fill="both", expand=True)
 
-        # Mostramos la página 1 por defecto
-        self._ir_a_normalizacion()
+        # Páginas como CTkScrollableFrame (incluye scroll vertical automático)
+        self._pagina1 = ctk.CTkScrollableFrame(self._contenedor, fg_color=C_FONDO)
+        self._pagina2 = ctk.CTkScrollableFrame(self._contenedor, fg_color=C_FONDO)
 
-    # ================================================================
-    # ENCABEZADO (título + botones + breadcrumb)
-    # ================================================================
+        self._construir_pagina1()
+        self._construir_pagina2()
 
-    def _construir_encabezado(self):
-        marco_encabezado = tk.Frame(
-            self.ventana_raiz, bg=COLOR_TARJETA, pady=12,
-            highlightthickness=1, highlightbackground=COLOR_BORDE
-        )
-        marco_encabezado.pack(fill="x")
+        self._ir_pagina1()
 
-        # Título
-        tk.Label(
-            marco_encabezado,
+    # ── Barra de navegación superior ─────────────────────────────────────
+
+    def _construir_barra_nav(self):
+        barra = ctk.CTkFrame(self.raiz, fg_color=C_TARJETA, height=48, corner_radius=0)
+        barra.pack(fill="x")
+        barra.pack_propagate(False)
+
+        ctk.CTkLabel(
+            barra,
             text="Ecualizador de Imágenes — Preprocesamiento ML",
-            font=("Arial", 16, "bold"),
-            bg=COLOR_TARJETA, fg=COLOR_TITULO
-        ).pack()
+            font=ctk.CTkFont(size=13, weight="bold"),
+            text_color=C_TITULO
+        ).pack(side="left", padx=18, pady=10)
 
-        # Botonera de acciones
-        marco_botones = tk.Frame(marco_encabezado, bg=COLOR_TARJETA)
-        marco_botones.pack(pady=(8, 6))
+        # Breadcrumb (migas de pan) a la derecha
+        frame_breadcrumb = ctk.CTkFrame(barra, fg_color=C_TARJETA)
+        frame_breadcrumb.pack(side="right", padx=14)
 
-        self._crear_boton(
-            marco_botones, "Cargar Imagen", COLOR_BOTON_CARGAR, self.cargar_imagen
-        ).pack(side="left", padx=5)
-
-        self._crear_boton(
-            marco_botones, "Reset", COLOR_BOTON_RESET, self.resetear_aplicacion
-        ).pack(side="left", padx=5)
-
-        self._crear_boton(
-            marco_botones, "Guardar Imagen Final", COLOR_BOTON_GUARDAR, self.guardar_imagen_final
-        ).pack(side="left", padx=5)
-
-        # Separador
-        tk.Frame(marco_encabezado, height=1, bg=COLOR_BORDE).pack(fill="x", pady=(6, 0))
-
-        # Breadcrumb / migas de pan
-        marco_breadcrumb = tk.Frame(marco_encabezado, bg=COLOR_TARJETA)
-        marco_breadcrumb.pack(pady=(6, 0))
-
-        self.boton_nav_normalizacion = tk.Button(
-            marco_breadcrumb,
-            text="1. Normalización de Canales",
-            font=("Arial", 10, "bold"),
-            bd=0, padx=18, pady=6, cursor="hand2",
-            command=self._ir_a_normalizacion
+        self._btn_nav1 = ctk.CTkButton(
+            frame_breadcrumb,
+            text="1 · Normalización",
+            width=155, height=30,
+            font=ctk.CTkFont(size=11),
+            fg_color=C_AZUL,
+            command=self._ir_pagina1
         )
-        self.boton_nav_normalizacion.pack(side="left", padx=2)
+        self._btn_nav1.pack(side="left", padx=(0, 4))
 
-        tk.Label(
-            marco_breadcrumb, text="›",
-            font=("Arial", 14), bg=COLOR_TARJETA, fg=COLOR_TEXTO_GRIS
+        self._btn_nav2 = ctk.CTkButton(
+            frame_breadcrumb,
+            text="2 · Comprimir y Binarizar",
+            width=180, height=30,
+            font=ctk.CTkFont(size=11),
+            fg_color=C_GRIS_BTN, hover_color=C_GRIS_HOVER,
+            command=self._ir_pagina2
+        )
+        self._btn_nav2.pack(side="left")
+
+    # ── Navegación entre páginas ──────────────────────────────────────────
+
+    def _ir_pagina1(self):
+        self._pagina2.pack_forget()
+        self._pagina1.pack(fill="both", expand=True)
+        self._btn_nav1.configure(fg_color=C_AZUL)
+        self._btn_nav2.configure(fg_color=C_GRIS_BTN)
+
+    def _ir_pagina2(self):
+        if self.imagen_original is None:
+            messagebox.showwarning(
+                "Sin imagen",
+                "Primero carga una imagen en la página de Normalización."
+            )
+            return
+        self._pagina1.pack_forget()
+        self._pagina2.pack(fill="both", expand=True)
+        self._btn_nav1.configure(fg_color=C_GRIS_BTN)
+        self._btn_nav2.configure(fg_color=C_AZUL)
+        self._actualizar_pagina2()
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # PÁGINA 1 — Normalización por Canal
+    # ═══════════════════════════════════════════════════════════════════════
+
+    def _construir_pagina1(self):
+        p = self._pagina1
+
+        # Títulos de la página
+        ctk.CTkLabel(
+            p,
+            text="Paso 1 de 2 — Normalización por Canal RGB",
+            font=ctk.CTkFont(size=16, weight="bold"),
+            text_color=C_TITULO
+        ).pack(pady=(16, 2))
+
+        ctk.CTkLabel(
+            p,
+            text=(
+                "Arrastra los puntos de cada curva para definir el rango de normalización.  "
+                "La imagen del canal se actualiza en tiempo real."
+            ),
+            font=ctk.CTkFont(size=11),
+            text_color=C_SUBTITULO
+        ).pack(pady=(0, 12))
+
+        # ── Fila superior: Imagen Original + Canal R + Canal G + Canal B ──
+        fila_top = ctk.CTkFrame(p, fg_color=C_FONDO)
+        fila_top.pack(fill="x", padx=8)
+
+        self._construir_col_original(fila_top)
+        for letra in ("R", "G", "B"):
+            self._construir_col_canal(fila_top, letra)
+
+        # ── Botón Reset Todo ──────────────────────────────────────────────
+        ctk.CTkButton(
+            p,
+            text="↺   Reset Todo  (restaurar los 3 canales a sin normalización)",
+            fg_color=C_GRIS_BTN, hover_color=C_GRIS_HOVER,
+            font=ctk.CTkFont(size=11),
+            height=34, width=420,
+            command=self._reset_todo
+        ).pack(pady=12)
+
+        # Separador visual
+        ctk.CTkFrame(p, height=2, fg_color=C_BORDE).pack(fill="x", padx=16, pady=4)
+
+        # ── Sección: Imagen Recombinada ───────────────────────────────────
+        ctk.CTkLabel(
+            p,
+            text="Imagen Recombinada Normalizada",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            text_color=C_TITULO
+        ).pack(pady=(12, 4))
+
+        marco_recomb = ctk.CTkFrame(p, fg_color=C_TARJETA,
+                                    corner_radius=8,
+                                    border_color=C_BORDE, border_width=1)
+        marco_recomb.pack(pady=4)
+
+        self._lbl_recombinada = self._cuadro_imagen(
+            marco_recomb, ANCHO_ORIG * 2, ALTO_ORIG,
+            "Sin imagen normalizada aún"
+        )
+
+        # ── Sección: Canales Normalizados + Histogramas ───────────────────
+        ctk.CTkLabel(
+            p,
+            text="Canales Normalizados — R' · G' · B'  (histogramas con eje Y fijo)",
+            font=ctk.CTkFont(size=12),
+            text_color=C_SUBTITULO
+        ).pack(pady=(16, 4))
+
+        ctk.CTkLabel(
+            p,
+            text=(
+                "El eje Y de los histogramas usa la escala del canal original, "
+                "permitiendo ver visualmente cómo se redistribuyen los píxeles."
+            ),
+            font=ctk.CTkFont(size=10),
+            text_color=C_SUBTITULO
+        ).pack(pady=(0, 6))
+
+        fila_norm = ctk.CTkFrame(p, fg_color=C_FONDO)
+        fila_norm.pack(pady=4)
+
+        for letra in ("R", "G", "B"):
+            self._construir_col_normalizado(fila_norm, letra)
+
+        # ── Botón Siguiente ───────────────────────────────────────────────
+        ctk.CTkFrame(p, height=2, fg_color=C_BORDE).pack(fill="x", padx=16, pady=12)
+
+        ctk.CTkButton(
+            p,
+            text="→   Siguiente: Comprimir y Binarizar",
+            fg_color=C_AZUL, hover_color=C_AZUL_HOVER,
+            font=ctk.CTkFont(size=13, weight="bold"),
+            height=40,
+            command=self._ir_pagina2
+        ).pack(pady=(4, 20), padx=30, anchor="e")
+
+    def _construir_col_original(self, contenedor):
+        """Columna de imagen original con el botón Cargar Imagen."""
+        col = ctk.CTkFrame(contenedor, fg_color=C_TARJETA,
+                           corner_radius=10,
+                           border_color=C_BORDE, border_width=1)
+        col.pack(side="left", padx=5, pady=6, anchor="n")
+
+        ctk.CTkLabel(col, text="Imagen Original",
+                     font=ctk.CTkFont(size=12, weight="bold"),
+                     text_color=C_TITULO).pack(pady=(10, 4), padx=10)
+
+        self._lbl_original = self._cuadro_imagen(
+            col, ANCHO_ORIG, ALTO_ORIG, "Carga\nuna imagen"
+        )
+
+        ctk.CTkButton(
+            col,
+            text="📂   Cargar Imagen",
+            fg_color=C_AZUL, hover_color=C_AZUL_HOVER,
+            height=36,
+            command=self._cargar_imagen
+        ).pack(pady=(10, 14), padx=12)
+
+    def _construir_col_canal(self, contenedor, letra):
+        """
+        Columna de un canal de color (R, G o B).
+        Estructura vertical:
+            título del canal
+            → imagen en escala de grises (actualizada en tiempo real)
+            → curva interactiva (con histograma original de fondo)
+            → etiqueta Min / Max
+            → botón Limpiar canal
+        """
+        color = COLOR_CANAL[letra]
+        col   = ctk.CTkFrame(contenedor, fg_color=C_TARJETA,
+                              corner_radius=10,
+                              border_color=C_BORDE, border_width=1)
+        col.pack(side="left", padx=5, pady=6, anchor="n")
+
+        # Título del canal
+        ctk.CTkLabel(col, text=NOMBRE_CANAL[letra],
+                     font=ctk.CTkFont(size=12, weight="bold"),
+                     text_color=color).pack(pady=(10, 4), padx=10)
+
+        # Imagen en escala de grises (se actualiza cuando el usuario mueve la curva)
+        lbl_img = self._cuadro_imagen(col, ANCHO_CANAL, ALTO_CANAL, "—")
+        self._lbl_canal_top[letra] = lbl_img
+
+        # Curva interactiva (el histograma original está de fondo semitransparente)
+        curva = CurvaCanal(
+            col,
+            color_canal=color,
+            callback=lambda vmin, vmax, l=letra: self._al_cambiar_curva(l, vmin, vmax),
+            ancho_pulgadas=3.5,
+            alto_pulgadas=2.6,
+        )
+        curva.pack(pady=(4, 2), padx=8)
+        self._curvas[letra] = curva
+
+        # Etiqueta con los valores actuales de min y max
+        lbl_mm = ctk.CTkLabel(
+            col,
+            text="Min: 0   Max: 255",
+            font=ctk.CTkFont(family="Consolas", size=10),
+            text_color=C_SUBTITULO
+        )
+        lbl_mm.pack(pady=2)
+        self._lbl_minmax[letra] = lbl_mm
+
+        # Botón para resetear solo este canal
+        ctk.CTkButton(
+            col,
+            text=f"↺  Limpiar {letra}",
+            fg_color=C_GRIS_BTN, hover_color=C_GRIS_HOVER,
+            height=28, width=110,
+            font=ctk.CTkFont(size=11),
+            command=lambda l=letra: self._reset_canal(l)
+        ).pack(pady=(2, 12))
+
+    def _construir_col_normalizado(self, contenedor, letra):
+        """
+        Columna de análisis del canal ya normalizado.
+        Estructura vertical:
+            título
+            → imagen del canal normalizado
+            → histograma con eje Y FIJO (para ver la redistribución)
+        """
+        color = COLOR_CANAL[letra]
+        col   = ctk.CTkFrame(contenedor, fg_color=C_TARJETA,
+                              corner_radius=10,
+                              border_color=C_BORDE, border_width=1)
+        col.pack(side="left", padx=8, pady=4)
+
+        ctk.CTkLabel(
+            col,
+            text=f"{NOMBRE_CANAL[letra]} — Normalizado",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color=color
+        ).pack(pady=(8, 4), padx=10)
+
+        # Imagen del canal normalizado (encima del histograma)
+        lbl = self._cuadro_imagen(col, ANCHO_NORM, ALTO_NORM, "—")
+        self._lbl_canal_norm[letra] = lbl
+
+        # Histograma normalizado con eje Y fijo
+        # El ancho del histograma coincide con el ancho de la imagen (ANCHO_NORM)
+        ancho_fig = ANCHO_NORM / 80   # pulgadas, dpi=80 → pixeles = ANCHO_NORM
+        alto_fig  = 2.0               # 2 pulgadas × 80 dpi = 160 px de alto
+
+        fig = Figure(figsize=(ancho_fig, alto_fig), dpi=80, facecolor=C_DARK_AX)
+        ax  = fig.add_subplot(111)
+        self._estilizar_eje_hist(ax)
+        fig.tight_layout(pad=0.3)
+
+        cv = FigureCanvasTkAgg(fig, master=col)
+        cv.get_tk_widget().pack(pady=(4, 12), padx=8)
+
+        self._ax_hist_norm[letra] = ax
+        self._cv_hist_norm[letra] = cv
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # PÁGINA 2 — Compresión y Binarización
+    # ═══════════════════════════════════════════════════════════════════════
+
+    def _construir_pagina2(self):
+        p = self._pagina2
+
+        ctk.CTkLabel(
+            p,
+            text="Paso 2 de 2 — Compresión por Bloques y Binarización",
+            font=ctk.CTkFont(size=16, weight="bold"),
+            text_color=C_TITULO
+        ).pack(pady=(16, 2))
+
+        ctk.CTkLabel(
+            p,
+            text=(
+                "La compresión y el threshold se aplican sobre la imagen ya normalizada "
+                "del paso anterior. Los cambios se reflejan en tiempo real."
+            ),
+            font=ctk.CTkFont(size=11),
+            text_color=C_SUBTITULO
+        ).pack(pady=(0, 14))
+
+        # ── Fila de tres imágenes ─────────────────────────────────────────
+        fila_imgs = ctk.CTkFrame(p, fg_color=C_FONDO)
+        fila_imgs.pack(pady=4, padx=12)
+
+        # Imagen 1: Original normalizada (referencia del paso anterior)
+        col1 = ctk.CTkFrame(fila_imgs, fg_color=C_TARJETA,
+                            corner_radius=10,
+                            border_color=C_BORDE, border_width=1)
+        col1.pack(side="left", padx=6, pady=4)
+        ctk.CTkLabel(col1, text="Original Normalizada",
+                     font=ctk.CTkFont(size=12, weight="bold"),
+                     text_color=C_TITULO).pack(pady=(10, 4))
+        self._lbl_p2_orig = self._cuadro_imagen(col1, ANCHO_P2, ALTO_P2, "—")
+        self._lbl_dim_orig = ctk.CTkLabel(
+            col1, text="", font=ctk.CTkFont(size=10), text_color=C_SUBTITULO)
+        self._lbl_dim_orig.pack(pady=(2, 10))
+
+        # Imagen 2: Comprimida por bloques (en escala de grises)
+        col2 = ctk.CTkFrame(fila_imgs, fg_color=C_TARJETA,
+                            corner_radius=10,
+                            border_color=C_BORDE, border_width=1)
+        col2.pack(side="left", padx=6, pady=4)
+        ctk.CTkLabel(col2, text="Imagen Comprimida (escala de grises)",
+                     font=ctk.CTkFont(size=12, weight="bold"),
+                     text_color=C_TITULO).pack(pady=(10, 4))
+        self._lbl_p2_comp = self._cuadro_imagen(col2, ANCHO_P2, ALTO_P2, "—")
+        self._lbl_dim_comp = ctk.CTkLabel(
+            col2, text="", font=ctk.CTkFont(size=10), text_color=C_SUBTITULO)
+        self._lbl_dim_comp.pack(pady=(2, 10))
+
+        # Imagen 3: Binaria (solo negro y blanco)
+        col3 = ctk.CTkFrame(fila_imgs, fg_color=C_TARJETA,
+                            corner_radius=10,
+                            border_color=C_BORDE, border_width=1)
+        col3.pack(side="left", padx=6, pady=4)
+        ctk.CTkLabel(col3, text="Imagen Binaria (Threshold)",
+                     font=ctk.CTkFont(size=12, weight="bold"),
+                     text_color=C_TITULO).pack(pady=(10, 4))
+        self._lbl_p2_bin = self._cuadro_imagen(col3, ANCHO_P2, ALTO_P2, "—")
+        self._lbl_info_bin = ctk.CTkLabel(
+            col3, text="", font=ctk.CTkFont(size=10), text_color=C_SUBTITULO)
+        self._lbl_info_bin.pack(pady=(2, 10))
+
+        # ── Panel de controles ────────────────────────────────────────────
+        panel = ctk.CTkFrame(p, fg_color=C_TARJETA,
+                              corner_radius=10,
+                              border_color=C_BORDE, border_width=1)
+        panel.pack(fill="x", padx=20, pady=14)
+
+        ctk.CTkLabel(panel, text="Controles de Procesamiento",
+                     font=ctk.CTkFont(size=13, weight="bold"),
+                     text_color=C_TITULO).pack(anchor="w", padx=16, pady=(12, 6))
+
+        ctk.CTkFrame(panel, height=1, fg_color=C_BORDE).pack(fill="x", padx=16)
+
+        # ─ Tamaño de bloque ───────────────────────────────────────────────
+        sec_bloque = ctk.CTkFrame(panel, fg_color=C_TARJETA)
+        sec_bloque.pack(anchor="w", padx=16, pady=(12, 4))
+
+        ctk.CTkLabel(
+            sec_bloque,
+            text="Tamaño de bloque para compresión por promedio:",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color=C_TITULO
+        ).pack(anchor="w", pady=(0, 6))
+
+        fila_radio = ctk.CTkFrame(sec_bloque, fg_color=C_TARJETA)
+        fila_radio.pack(anchor="w")
+
+        self._var_bloque = ctk.IntVar(value=2)
+        for tam in (2, 4, 8, 16):
+            ctk.CTkRadioButton(
+                fila_radio,
+                text=f"   {tam}×{tam}   ",
+                variable=self._var_bloque,
+                value=tam,
+                command=self._al_cambiar_bloque,
+                text_color=C_TITULO,
+                radiobutton_width=16,
+                radiobutton_height=16,
+                font=ctk.CTkFont(size=12)
+            ).pack(side="left", padx=14)
+
+        ctk.CTkLabel(
+            sec_bloque,
+            text="Cada bloque de N×N píxeles se reemplaza por el promedio de sus valores.",
+            font=ctk.CTkFont(size=10),
+            text_color=C_SUBTITULO
+        ).pack(anchor="w", pady=(6, 0))
+
+        ctk.CTkFrame(panel, height=1, fg_color=C_BORDE).pack(fill="x", padx=16, pady=10)
+
+        # ─ Umbral de binarización ─────────────────────────────────────────
+        sec_umbral = ctk.CTkFrame(panel, fg_color=C_TARJETA)
+        sec_umbral.pack(fill="x", padx=16, pady=(0, 12))
+
+        # Fila con el título + media calculada (referencia)
+        fila_tit = ctk.CTkFrame(sec_umbral, fg_color=C_TARJETA)
+        fila_tit.pack(fill="x")
+
+        ctk.CTkLabel(
+            fila_tit,
+            text="Umbral de binarización (threshold):",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color=C_TITULO
+        ).pack(side="left", pady=(0, 6))
+
+        self._lbl_media_ref = ctk.CTkLabel(
+            fila_tit,
+            text="   |   Media de la imagen: —",
+            font=ctk.CTkFont(size=11),
+            text_color=C_SUBTITULO
+        )
+        self._lbl_media_ref.pack(side="left", pady=(0, 6))
+
+        # Fila con el slider + valor numérico
+        fila_slider = ctk.CTkFrame(sec_umbral, fg_color=C_TARJETA)
+        fila_slider.pack(fill="x")
+
+        self._slider_umbral = ctk.CTkSlider(
+            fila_slider,
+            from_=0, to=255, number_of_steps=255,
+            command=self._al_cambiar_umbral,
+            width=400
+        )
+        self._slider_umbral.set(128)
+        self._slider_umbral.pack(side="left", padx=(0, 14))
+
+        self._lbl_umbral_val = ctk.CTkLabel(
+            fila_slider,
+            text="Umbral: 128",
+            font=ctk.CTkFont(family="Consolas", size=12, weight="bold"),
+            text_color=C_TITULO,
+            width=110
+        )
+        self._lbl_umbral_val.pack(side="left")
+
+        # Explicación de la regla de threshold
+        ctk.CTkLabel(
+            sec_umbral,
+            text=(
+                "pixel ≥ umbral  →  255 (blanco)     |     "
+                "pixel < umbral  →  0 (negro)"
+            ),
+            font=ctk.CTkFont(size=10),
+            text_color=C_SUBTITULO
+        ).pack(anchor="w", pady=(6, 0))
+
+        # ── Botones de navegación ─────────────────────────────────────────
+        fila_nav = ctk.CTkFrame(p, fg_color=C_FONDO)
+        fila_nav.pack(fill="x", padx=20, pady=(8, 20))
+
+        ctk.CTkButton(
+            fila_nav,
+            text="←   Volver a Normalización",
+            fg_color=C_GRIS_BTN, hover_color=C_GRIS_HOVER,
+            height=36,
+            command=self._ir_pagina1
         ).pack(side="left")
 
-        self.boton_nav_compresion = tk.Button(
-            marco_breadcrumb,
-            text="2. Compresión y Threshold",
-            font=("Arial", 10, "bold"),
-            bd=0, padx=18, pady=6, cursor="hand2",
-            command=self._ir_a_compresion
-        )
-        self.boton_nav_compresion.pack(side="left", padx=2)
+        ctk.CTkButton(
+            fila_nav,
+            text="💾   Guardar Imagen Binaria",
+            fg_color=C_VERDE, hover_color=C_VERDE_HOVER,
+            height=36,
+            command=self._guardar_binaria
+        ).pack(side="right")
 
-    def _crear_boton(self, contenedor, texto, color, comando):
-        return tk.Button(
-            contenedor, text=texto, command=comando,
-            bg=color, fg="white",
-            font=("Arial", 10, "bold"),
-            activebackground=color, activeforeground="white",
-            bd=0, padx=20, pady=8, cursor="hand2"
-        )
+    # ═══════════════════════════════════════════════════════════════════════
+    # LÓGICA: Carga de imagen
+    # ═══════════════════════════════════════════════════════════════════════
 
-    # ================================================================
-    # NAVEGACIÓN ENTRE PÁGINAS (breadcrumb)
-    # ================================================================
-
-    def _ir_a_normalizacion(self):
-        self.pagina_compresion.pack_forget()
-        self.pagina_normalizacion.pack(fill="both", expand=True)
-        self.boton_nav_normalizacion.config(bg=COLOR_NAV_ACTIVO, fg="white")
-        self.boton_nav_compresion.config(bg=COLOR_NAV_INACTIVO, fg=COLOR_SUBTITULO)
-
-    def _ir_a_compresion(self):
-        self.pagina_normalizacion.pack_forget()
-        self.pagina_compresion.pack(fill="both", expand=True)
-        self.boton_nav_normalizacion.config(bg=COLOR_NAV_INACTIVO, fg=COLOR_SUBTITULO)
-        self.boton_nav_compresion.config(bg=COLOR_NAV_ACTIVO, fg="white")
-        # Sincronizamos la previsualización de la imagen original en página 2
-        self._actualizar_original_pagina2()
-
-    # ================================================================
-    # PÁGINA 1 — NORMALIZACIÓN
-    # ================================================================
-
-    def _construir_pagina_normalizacion(self, contenedor):
-
-        # ---- SECCIÓN SUPERIOR: Imagen original + 3 canales originales ----
-        seccion_original = self._crear_tarjeta(
-            contenedor,
-            "Imagen Original y Canales  |  mueve los sliders para normalizar"
-        )
-
-        fila_superior = tk.Frame(seccion_original, bg=COLOR_TARJETA)
-        fila_superior.pack(fill="x")
-
-        # Columna 0 — imagen original grande
-        marco_col_original = tk.Frame(fila_superior, bg=COLOR_TARJETA)
-        marco_col_original.pack(side="left", padx=15, anchor="n", pady=5)
-
-        tk.Label(
-            marco_col_original, text="Imagen Original",
-            font=("Arial", 10, "bold"),
-            bg=COLOR_TARJETA, fg=COLOR_TITULO
-        ).pack(pady=(0, 4))
-
-        self.label_imagen_original = self._crear_contenedor_imagen(
-            marco_col_original,
-            ANCHO_IMG_GRANDE, ALTO_IMG_GRANDE,
-            "Carga una imagen\npara comenzar"
-        )
-
-        # Columnas 1-3 — canales R, G, B originales
-        self.widgets_canal_rojo = self._construir_col_canal_original(
-            fila_superior, "Canal Rojo (R)", COLOR_CANAL_ROJO, indice_canal=0
-        )
-        self.widgets_canal_verde = self._construir_col_canal_original(
-            fila_superior, "Canal Verde (G)", COLOR_CANAL_VERDE, indice_canal=1
-        )
-        self.widgets_canal_azul = self._construir_col_canal_original(
-            fila_superior, "Canal Azul (B)", COLOR_CANAL_AZUL, indice_canal=2
-        )
-
-        # ---- SECCIÓN INFERIOR: Imagen recombinada + 3 canales normalizados ----
-        seccion_recombinada = self._crear_tarjeta(
-            contenedor,
-            "Imagen Recombinada y Canales Normalizados"
-        )
-
-        fila_inferior = tk.Frame(seccion_recombinada, bg=COLOR_TARJETA)
-        fila_inferior.pack(fill="x")
-
-        # Columna 0 — imagen recombinada grande
-        marco_col_recombinada = tk.Frame(fila_inferior, bg=COLOR_TARJETA)
-        marco_col_recombinada.pack(side="left", padx=15, anchor="n", pady=5)
-
-        tk.Label(
-            marco_col_recombinada, text="Imagen Recombinada",
-            font=("Arial", 10, "bold"),
-            bg=COLOR_TARJETA, fg=COLOR_TITULO
-        ).pack(pady=(0, 4))
-
-        self.label_imagen_recombinada = self._crear_contenedor_imagen(
-            marco_col_recombinada,
-            ANCHO_IMG_GRANDE, ALTO_IMG_GRANDE,
-            "Esperando\nnormalización"
-        )
-
-        # Columnas 1-3 — canales normalizados
-        self.widgets_canal_rojo_mod = self._construir_col_canal_modificado(
-            fila_inferior, "R' Normalizado", COLOR_CANAL_ROJO
-        )
-        self.widgets_canal_verde_mod = self._construir_col_canal_modificado(
-            fila_inferior, "G' Normalizado", COLOR_CANAL_VERDE
-        )
-        self.widgets_canal_azul_mod = self._construir_col_canal_modificado(
-            fila_inferior, "B' Normalizado", COLOR_CANAL_AZUL
-        )
-
-    def _construir_col_canal_original(self, contenedor_fila, titulo, color, indice_canal):
-        """
-        Columna de canal ORIGINAL:  imagen en grises → histograma → range slider.
-        """
-        marco = tk.Frame(contenedor_fila, bg=COLOR_TARJETA)
-        marco.pack(side="left", padx=10, anchor="n", pady=5)
-
-        tk.Label(
-            marco, text=titulo,
-            font=("Arial", 10, "bold"),
-            bg=COLOR_TARJETA, fg=color
-        ).pack(pady=(0, 4))
-
-        # Imagen del canal en escala de grises (arriba del histograma)
-        label_imagen = self._crear_contenedor_imagen(
-            marco, ANCHO_IMG_CANAL, ALTO_IMG_CANAL, "sin cargar"
-        )
-
-        # Histograma debajo de la imagen
-        figura, eje = crear_figura_histograma()
-        canvas_histograma = FigureCanvasTkAgg(figura, master=marco)
-        canvas_histograma.get_tk_widget().pack(pady=(4, 2))
-
-        # RangeSlider (un solo slider con dos manejadores: min y max)
-        slider_rango = RangeSlider(
-            marco,
-            desde=0, hasta=255,
-            valor_min_inicial=0, valor_max_inicial=255,
-            ancho=ANCHO_IMG_CANAL,
-            color_activo=color,
-            color_fondo=COLOR_TARJETA,
-            callback=lambda vmin, vmax, idx=indice_canal:
-                self.al_cambiar_slider(idx, vmin, vmax)
-        )
-        slider_rango.pack(pady=(2, 5))
-
-        return {
-            "label_imagen": label_imagen,
-            "figura": figura,
-            "eje": eje,
-            "canvas_histograma": canvas_histograma,
-            "slider_rango": slider_rango,
-            "color": color,
-        }
-
-    def _construir_col_canal_modificado(self, contenedor_fila, titulo, color):
-        """
-        Columna de canal MODIFICADO/NORMALIZADO:  imagen en grises → histograma.
-        (Sin slider, porque el slider está en la sección de originales.)
-        """
-        marco = tk.Frame(contenedor_fila, bg=COLOR_TARJETA)
-        marco.pack(side="left", padx=10, anchor="n", pady=5)
-
-        tk.Label(
-            marco, text=titulo,
-            font=("Arial", 10, "bold"),
-            bg=COLOR_TARJETA, fg=color
-        ).pack(pady=(0, 4))
-
-        # Imagen del canal normalizado (arriba del histograma)
-        label_imagen = self._crear_contenedor_imagen(
-            marco, ANCHO_IMG_CANAL, ALTO_IMG_CANAL, "sin procesar"
-        )
-
-        # Histograma debajo
-        figura, eje = crear_figura_histograma()
-        canvas_histograma = FigureCanvasTkAgg(figura, master=marco)
-        canvas_histograma.get_tk_widget().pack(pady=(4, 5))
-
-        return {
-            "label_imagen": label_imagen,
-            "figura": figura,
-            "eje": eje,
-            "canvas_histograma": canvas_histograma,
-            "color": color,
-        }
-
-    # ================================================================
-    # PÁGINA 2 — COMPRESIÓN Y THRESHOLD
-    # ================================================================
-
-    def _construir_pagina_compresion(self, contenedor):
-
-        # ---- Imagen original (previsualización de referencia) ----
-        seccion_ref = self._crear_tarjeta(
-            contenedor,
-            "Imagen de referencia (normalizada)"
-        )
-
-        marco_ref = tk.Frame(seccion_ref, bg=COLOR_TARJETA)
-        marco_ref.pack(anchor="center")
-
-        tk.Label(
-            marco_ref, text="Imagen tras normalización",
-            font=("Arial", 10, "bold"),
-            bg=COLOR_TARJETA, fg=COLOR_TITULO
-        ).pack(pady=(0, 4))
-
-        self.label_imagen_original_pag2 = self._crear_contenedor_imagen(
-            marco_ref,
-            ANCHO_IMG_RESULTADO, ALTO_IMG_RESULTADO,
-            "Carga una imagen en la página anterior"
-        )
-
-        # ---- Compresión por bloques ----
-        seccion_compresion = self._crear_tarjeta(
-            contenedor,
-            "Compresión por Bloques (grises + promedio por bloque)"
-        )
-
-        # Selector de tamaño de bloque
-        marco_selector = tk.Frame(seccion_compresion, bg=COLOR_TARJETA)
-        marco_selector.pack(pady=(0, 10))
-
-        tk.Label(
-            marco_selector, text="Tamaño de bloque:",
-            font=("Arial", 10, "bold"),
-            bg=COLOR_TARJETA, fg=COLOR_TITULO
-        ).pack(side="left", padx=(0, 12))
-
-        for tam in [2, 4, 8, 16, 32]:
-            tk.Radiobutton(
-                marco_selector,
-                text=f"{tam}×{tam}",
-                variable=self.tamano_bloque_seleccionado,
-                value=tam,
-                command=self.aplicar_compresion_y_threshold,
-                bg=COLOR_TARJETA, fg=COLOR_TITULO,
-                activebackground=COLOR_TARJETA,
-                selectcolor=COLOR_TARJETA,
-                font=("Arial", 10),
-                cursor="hand2"
-            ).pack(side="left", padx=6)
-
-        # Imagen comprimida centrada
-        marco_comprimida = tk.Frame(seccion_compresion, bg=COLOR_TARJETA)
-        marco_comprimida.pack(anchor="center")
-
-        tk.Label(
-            marco_comprimida, text="Imagen comprimida",
-            font=("Arial", 10, "bold"),
-            bg=COLOR_TARJETA, fg=COLOR_TITULO
-        ).pack(pady=(0, 4))
-
-        self.label_imagen_comprimida = self._crear_contenedor_imagen(
-            marco_comprimida,
-            ANCHO_IMG_RESULTADO, ALTO_IMG_RESULTADO,
-            "Aplica normalización primero"
-        )
-
-        # ---- Threshold ----
-        seccion_threshold = self._crear_tarjeta(
-            contenedor,
-            "Threshold — Imagen Binaria Final"
-        )
-
-        self.label_valor_media = tk.Label(
-            seccion_threshold,
-            text="Media usada como umbral: —",
-            font=("Arial", 10, "bold"),
-            bg=COLOR_TARJETA, fg=COLOR_TITULO
-        )
-        self.label_valor_media.pack(pady=(0, 8))
-
-        marco_binaria = tk.Frame(seccion_threshold, bg=COLOR_TARJETA)
-        marco_binaria.pack(anchor="center")
-
-        tk.Label(
-            marco_binaria, text="Imagen binaria (threshold)",
-            font=("Arial", 10, "bold"),
-            bg=COLOR_TARJETA, fg=COLOR_TITULO
-        ).pack(pady=(0, 4))
-
-        self.label_imagen_binaria = self._crear_contenedor_imagen(
-            marco_binaria,
-            ANCHO_IMG_RESULTADO, ALTO_IMG_RESULTADO,
-            "Esperando compresión"
-        )
-
-    # ================================================================
-    # HELPERS DE UI
-    # ================================================================
-
-    def _crear_tarjeta(self, contenedor, titulo):
-        """Crea una tarjeta blanca con borde y título, devuelve el frame interno."""
-        marco_externo = tk.Frame(contenedor, bg=COLOR_FONDO, padx=18, pady=8)
-        marco_externo.pack(fill="x")
-
-        marco_tarjeta = tk.Frame(
-            marco_externo, bg=COLOR_TARJETA,
-            highlightthickness=1, highlightbackground=COLOR_BORDE
-        )
-        marco_tarjeta.pack(fill="x")
-
-        tk.Label(
-            marco_tarjeta, text=titulo,
-            font=("Arial", 11, "bold"),
-            bg=COLOR_TARJETA, fg=COLOR_TITULO, anchor="w"
-        ).pack(fill="x", padx=18, pady=(12, 6))
-
-        tk.Frame(marco_tarjeta, height=1, bg=COLOR_BORDE).pack(fill="x")
-
-        marco_contenido = tk.Frame(marco_tarjeta, bg=COLOR_TARJETA, padx=18, pady=14)
-        marco_contenido.pack(fill="x")
-
-        return marco_contenido
-
-    def _crear_contenedor_imagen(self, contenedor_padre, ancho, alto, texto_inicial):
-        """
-        Crea un cuadro fijo (ancho x alto px) donde se muestra la imagen.
-        Usa pack_propagate(False) para que el cuadro no cambie de tamaño
-        aunque la imagen sea más pequeña (útil con imágenes panorámicas).
-        Devuelve el Label donde se asignará la imagen luego.
-        """
-        marco = tk.Frame(
-            contenedor_padre,
-            width=ancho, height=alto,
-            bg=COLOR_PLACEHOLDER,
-            highlightthickness=1,
-            highlightbackground=COLOR_BORDE
-        )
-        marco.pack_propagate(False)   # <- no colapsar al tamaño del hijo
-        marco.pack(pady=4)            # <- EMPAQUETAMOS el marco aquí
-
-        label = tk.Label(
-            marco, text=texto_inicial,
-            bg=COLOR_PLACEHOLDER, fg=COLOR_TEXTO_GRIS,
-            font=("Arial", 9, "italic"), wraplength=ancho - 10
-        )
-        label.pack(expand=True)        # centrado dentro del marco fijo
-
-        return label                   # devolvemos solo el Label
-
-    # ================================================================
-    # MÉTODOS DE ACCIÓN (responden a eventos del usuario)
-    # ================================================================
-
-    def cargar_imagen(self):
-        """Abre diálogo de archivo y ejecuta todo el pipeline de procesamiento."""
+    def _cargar_imagen(self):
         ruta = filedialog.askopenfilename(
-            title="Seleccione una imagen",
+            title="Seleccionar imagen",
             filetypes=[
-                ("Imágenes", "*.png *.jpg *.jpeg *.bmp *.tiff"),
+                ("Imágenes", "*.png *.jpg *.jpeg *.bmp *.tiff *.webp"),
                 ("Todos los archivos", "*.*")
             ]
         )
         if not ruta:
             return
 
-        imagen_cargada = cv2.imread(ruta)
-        if imagen_cargada is None:
-            messagebox.showerror("Error", "No se pudo cargar el archivo. Verifica que sea una imagen válida.")
+        img = cv2.imread(ruta)
+        if img is None:
+            messagebox.showerror("Error", "No se pudo leer la imagen seleccionada.")
             return
 
-        self.imagen_original = imagen_cargada
+        self.imagen_original = img
 
-        # Separamos en canales y guardamos los originales
-        canal_r, canal_g, canal_b = separar_canales(self.imagen_original)
-        self.canal_rojo_original = canal_r
-        self.canal_verde_original = canal_g
-        self.canal_azul_original = canal_b
+        # Separar los tres canales de color (devuelve R, G, B por separado)
+        r, g, b = separar_canales(img)
+        self.canales_orig = {"R": r, "G": g, "B": b}
 
-        # Inicialmente los canales normalizados son iguales a los originales
-        self.canal_rojo_normalizado = canal_r.copy()
-        self.canal_verde_normalizado = canal_g.copy()
-        self.canal_azul_normalizado = canal_b.copy()
+        # Calcular histogramas originales de los tres canales
+        histogramas_orig = {l: calcular_histograma(self.canales_orig[l]) for l in "RGB"}
 
-        # Reiniciamos los sliders (por si venía de una imagen anterior)
-        self.widgets_canal_rojo["slider_rango"].resetear()
-        self.widgets_canal_verde["slider_rango"].resetear()
-        self.widgets_canal_azul["slider_rango"].resetear()
+        # Determinar el máximo de conteo para fijar el eje Y de todos los histogramas.
+        # Usar el mismo techo en todos los histogramas permite comparar la distribución
+        # antes y después de normalizar sin que la escala engañe al observador.
+        self.y_max_hist = max(h.max() for h in histogramas_orig.values())
+        if self.y_max_hist < 1:
+            self.y_max_hist = 1
 
-        # Mostramos imagen original
-        self._mostrar_imagen(
-            self.label_imagen_original, self.imagen_original,
-            "original", ANCHO_IMG_GRANDE, ALTO_IMG_GRANDE
-        )
+        # Cargar el histograma en cada curva (sin disparar el callback todavía)
+        # y resetear los valores a min=0, max=255 (sin cambio visual)
+        for letra in "RGB":
+            self._curvas[letra].cargar_histograma(histogramas_orig[letra])
+            self._curvas[letra].set_valores(0, 255)
+            self._lbl_minmax[letra].configure(text="Min: 0   Max: 255")
 
-        # Mostramos canales originales (imagen + histograma)
-        self._actualizar_canal(self.widgets_canal_rojo, canal_r, "r_orig")
-        self._actualizar_canal(self.widgets_canal_verde, canal_g, "g_orig")
-        self._actualizar_canal(self.widgets_canal_azul, canal_b, "b_orig")
+        # Mostrar la imagen original en la sección de Imagen Original
+        self._mostrar(self._lbl_original, img, "orig", ANCHO_ORIG, ALTO_ORIG)
 
-        # Mostramos canales modificados (mismos que originales al principio)
-        self._actualizar_canal(self.widgets_canal_rojo_mod, canal_r, "r_mod")
-        self._actualizar_canal(self.widgets_canal_verde_mod, canal_g, "g_mod")
-        self._actualizar_canal(self.widgets_canal_azul_mod, canal_b, "b_mod")
+        # Inicializar canales normalizados como copias exactas de los originales
+        # (min=0 y max=255 es la identidad: sin ningún cambio)
+        for letra in "RGB":
+            self.canales_norm[letra] = self.canales_orig[letra].copy()
+            self._mostrar(self._lbl_canal_top[letra],
+                          self.canales_norm[letra],
+                          f"canal_top_{letra}", ANCHO_CANAL, ALTO_CANAL)
+            self._mostrar(self._lbl_canal_norm[letra],
+                          self.canales_norm[letra],
+                          f"canal_norm_{letra}", ANCHO_NORM, ALTO_NORM)
+            hist = calcular_histograma(self.canales_norm[letra])
+            self._dibujar_histograma_normalizado(letra, hist)
 
-        self.actualizar_imagen_recombinada()
-        self.aplicar_compresion_y_threshold()
-        self._actualizar_original_pagina2()
+        # Mostrar la imagen recombinada (al inicio = igual a la original)
+        self._actualizar_recombinada()
 
-    def al_cambiar_slider(self, indice_canal, valor_min, valor_max):
+    # ═══════════════════════════════════════════════════════════════════════
+    # LÓGICA: Normalización en tiempo real
+    # ═══════════════════════════════════════════════════════════════════════
+
+    def _al_cambiar_curva(self, letra, vmin, vmax):
         """
-        Se ejecuta cuando el usuario mueve el RangeSlider de algún canal.
-        Normaliza ese canal y propaga el cambio hacia abajo en el pipeline.
+        Callback que se ejecuta cada vez que el usuario arrastra un punto
+        en la curva de un canal. Actualiza todas las visualizaciones en tiempo real.
         """
+        self._lbl_minmax[letra].configure(text=f"Min: {vmin}   Max: {vmax}")
+
+        # Si aún no hay imagen cargada, no hacemos nada más
         if self.imagen_original is None:
             return
 
-        # Identificamos qué canal se está modificando según el índice
-        if indice_canal == 0:
-            canal_base = self.canal_rojo_original
-            widgets_mod = self.widgets_canal_rojo_mod
-            clave_ref = "r_mod"
-        elif indice_canal == 1:
-            canal_base = self.canal_verde_original
-            widgets_mod = self.widgets_canal_verde_mod
-            clave_ref = "g_mod"
-        else:
-            canal_base = self.canal_azul_original
-            widgets_mod = self.widgets_canal_azul_mod
-            clave_ref = "b_mod"
+        self._normalizar_y_mostrar_canal(letra, vmin, vmax)
+        self._actualizar_recombinada()
 
-        if valor_max <= valor_min:
-            return
+    def _normalizar_y_mostrar_canal(self, letra, vmin, vmax):
+        """
+        Aplica la normalización min-max al canal indicado y actualiza
+        su imagen y su histograma en ambas secciones de la página 1.
+        """
+        # Fórmula:
+        #   pixel < vmin  → 0
+        #   pixel > vmax  → 255
+        #   entre vmin y vmax: (pixel - vmin) / (vmax - vmin) × 255
+        canal_normalizado = normalizar_canal(self.canales_orig[letra], vmin, vmax)
+        self.canales_norm[letra] = canal_normalizado
 
-        # Aplicamos la normalización min-max sobre el canal ORIGINAL
-        canal_normalizado = normalizar_canal(canal_base, valor_min, valor_max)
+        # Actualizar imagen sobre la curva (parte superior, en tiempo real)
+        self._mostrar(self._lbl_canal_top[letra],
+                      canal_normalizado,
+                      f"canal_top_{letra}", ANCHO_CANAL, ALTO_CANAL)
 
-        if indice_canal == 0:
-            self.canal_rojo_normalizado = canal_normalizado
-        elif indice_canal == 1:
-            self.canal_verde_normalizado = canal_normalizado
-        else:
-            self.canal_azul_normalizado = canal_normalizado
+        # Actualizar imagen en la sección inferior (análisis de canales normalizados)
+        self._mostrar(self._lbl_canal_norm[letra],
+                      canal_normalizado,
+                      f"canal_norm_{letra}", ANCHO_NORM, ALTO_NORM)
 
-        # Actualizamos el canal modificado (imagen + histograma)
-        self._actualizar_canal(widgets_mod, canal_normalizado, clave_ref)
+        # Actualizar histograma normalizado (con el eje Y fijo)
+        hist = calcular_histograma(canal_normalizado)
+        self._dibujar_histograma_normalizado(letra, hist)
 
-        # Propagamos hacia la imagen recombinada y etapas siguientes
-        self.actualizar_imagen_recombinada()
-        self.aplicar_compresion_y_threshold()
-
-    def actualizar_imagen_recombinada(self):
-        """Une los 3 canales normalizados y muestra la imagen recombinada."""
-        if self.canal_rojo_normalizado is None:
+    def _actualizar_recombinada(self):
+        """
+        Une los tres canales normalizados y muestra la imagen recombinada.
+        Solo se ejecuta cuando los tres canales están disponibles.
+        """
+        if any(v is None for v in self.canales_norm.values()):
             return
 
         self.imagen_recombinada = unir_canales(
-            self.canal_rojo_normalizado,
-            self.canal_verde_normalizado,
-            self.canal_azul_normalizado
+            self.canales_norm["R"],
+            self.canales_norm["G"],
+            self.canales_norm["B"]
         )
-        self._mostrar_imagen(
-            self.label_imagen_recombinada, self.imagen_recombinada,
-            "recombinada", ANCHO_IMG_GRANDE, ALTO_IMG_GRANDE
-        )
+        self._mostrar(self._lbl_recombinada, self.imagen_recombinada,
+                      "recomb", ANCHO_ORIG * 2, ALTO_ORIG)
 
-    def aplicar_compresion_y_threshold(self):
-        """Convierte a grises, comprime por bloques y aplica threshold."""
+    # ═══════════════════════════════════════════════════════════════════════
+    # LÓGICA: Botones de reset
+    # ═══════════════════════════════════════════════════════════════════════
+
+    def _reset_canal(self, letra):
+        """Restaura min=0 y max=255 en el canal indicado (solo ese canal)."""
+        self._curvas[letra].set_valores(0, 255)
+        self._lbl_minmax[letra].configure(text="Min: 0   Max: 255")
+
+        if self.imagen_original is not None:
+            self._normalizar_y_mostrar_canal(letra, 0, 255)
+            self._actualizar_recombinada()
+
+    def _reset_todo(self):
+        """Restaura los tres canales a sin normalización (min=0, max=255)."""
+        for letra in "RGB":
+            self._reset_canal(letra)
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # LÓGICA: Página 2 — Compresión y Threshold
+    # ═══════════════════════════════════════════════════════════════════════
+
+    def _actualizar_pagina2(self):
+        """Se llama al navegar a la página 2. Inicializa las tres imágenes."""
         if self.imagen_recombinada is None:
             return
 
-        # Paso 1: convertir a escala de grises con fórmula de luminancia
-        self.imagen_en_grises = convertir_a_grises(self.imagen_recombinada)
+        # Imagen de referencia: la ya normalizada del paso anterior
+        h, w = self.imagen_recombinada.shape[:2]
+        self._mostrar(self._lbl_p2_orig, self.imagen_recombinada,
+                      "p2_orig", ANCHO_P2, ALTO_P2)
+        self._lbl_dim_orig.configure(text=f"Dimensiones: {w} × {h} px")
 
-        # Paso 2: comprimir con el tamaño de bloque elegido
-        tam_bloque = self.tamano_bloque_seleccionado.get()
-        self.imagen_comprimida = comprimir_por_bloques(
-            self.imagen_en_grises, tam_bloque
+        # Aplicar compresión y threshold con los valores actuales del slider
+        self._aplicar_compresion_y_threshold()
+
+    def _al_cambiar_bloque(self):
+        """Se llama cuando el usuario selecciona un tamaño de bloque diferente."""
+        self.bloque_actual = self._var_bloque.get()
+        if self.imagen_recombinada is not None:
+            self._aplicar_compresion_y_threshold()
+
+    def _al_cambiar_umbral(self, valor):
+        """Se llama cuando el usuario mueve el slider de umbral."""
+        self.umbral_actual = int(float(valor))
+        self._lbl_umbral_val.configure(text=f"Umbral: {self.umbral_actual}")
+
+        # Solo re-aplicamos el threshold (la compresión no cambia)
+        if self.imagen_comprimida is not None:
+            self._aplicar_threshold_solo()
+
+    def _aplicar_compresion_y_threshold(self):
+        """
+        Convierte la imagen normalizada a escala de grises,
+        aplica la compresión por bloques y luego el threshold.
+        """
+        # Paso 1: convertir a escala de grises usando fórmula de luminancia
+        #         0.299 × R + 0.587 × G + 0.114 × B
+        gris = convertir_a_grises(self.imagen_recombinada)
+
+        # Paso 2: compresión por promedio de bloques NxN
+        comp = comprimir_por_bloques(gris, self.bloque_actual)
+        self.imagen_comprimida = comp
+
+        h, w = comp.shape[:2]
+        self._mostrar(self._lbl_p2_comp, comp, "p2_comp", ANCHO_P2, ALTO_P2)
+        self._lbl_dim_comp.configure(
+            text=f"Bloque {self.bloque_actual}×{self.bloque_actual}   |   {w}×{h} px"
         )
-        self._mostrar_imagen(
-            self.label_imagen_comprimida, self.imagen_comprimida,
-            "comprimida", ANCHO_IMG_RESULTADO, ALTO_IMG_RESULTADO
-        )
 
-        # Paso 3: threshold con la media como umbral
-        self.imagen_binaria, valor_media = aplicar_threshold(self.imagen_comprimida)
-        self.label_valor_media.config(
-            text=f"Media usada como umbral: {valor_media:.2f}"
-        )
-        self._mostrar_imagen(
-            self.label_imagen_binaria, self.imagen_binaria,
-            "binaria", ANCHO_IMG_RESULTADO, ALTO_IMG_RESULTADO
-        )
+        # Paso 3: binarización con el umbral actual
+        self._aplicar_threshold_solo()
 
-    def _actualizar_original_pagina2(self):
-        """Sincroniza la imagen de referencia en la página 2 con la recombinada actual."""
-        imagen_para_pag2 = self.imagen_recombinada if self.imagen_recombinada is not None \
-                           else self.imagen_original
-        if imagen_para_pag2 is not None:
-            self._mostrar_imagen(
-                self.label_imagen_original_pag2, imagen_para_pag2,
-                "original_pag2", ANCHO_IMG_RESULTADO, ALTO_IMG_RESULTADO
-            )
-
-    def resetear_aplicacion(self):
-        """Deja la aplicación en estado inicial sin imagen cargada."""
-        self.imagen_original = None
-        self.canal_rojo_original = None
-        self.canal_verde_original = None
-        self.canal_azul_original = None
-        self.canal_rojo_normalizado = None
-        self.canal_verde_normalizado = None
-        self.canal_azul_normalizado = None
-        self.imagen_recombinada = None
-        self.imagen_en_grises = None
-        self.imagen_comprimida = None
-        self.imagen_binaria = None
-        self.referencias_imagenes_tk.clear()
-
-        # Reseteamos sliders y limpiamos canales originales
-        for widgets in (self.widgets_canal_rojo,
-                        self.widgets_canal_verde,
-                        self.widgets_canal_azul):
-            widgets["slider_rango"].resetear()
-            widgets["label_imagen"].config(image="", text="sin cargar")
-            widgets["eje"].clear()
-            widgets["canvas_histograma"].draw()
-
-        # Limpiamos canales modificados
-        for widgets in (self.widgets_canal_rojo_mod,
-                        self.widgets_canal_verde_mod,
-                        self.widgets_canal_azul_mod):
-            widgets["label_imagen"].config(image="", text="sin procesar")
-            widgets["eje"].clear()
-            widgets["canvas_histograma"].draw()
-
-        self.label_imagen_original.config(image="", text="Carga una imagen\npara comenzar")
-        self.label_imagen_recombinada.config(image="", text="Esperando\nnormalización")
-        self.label_imagen_original_pag2.config(image="", text="Carga una imagen en la página anterior")
-        self.label_imagen_comprimida.config(image="", text="Aplica normalización primero")
-        self.label_imagen_binaria.config(image="", text="Esperando compresión")
-        self.label_valor_media.config(text="Media usada como umbral: —")
-        self.tamano_bloque_seleccionado.set(4)
-
-    def guardar_imagen_final(self):
-        """Guarda la imagen binaria final en la carpeta 'imagenes'."""
-        if self.imagen_binaria is None:
-            messagebox.showwarning("Atención", "No hay imagen final para guardar. Carga una imagen primero.")
+    def _aplicar_threshold_solo(self):
+        """
+        Aplica solo el threshold sobre la imagen comprimida actual,
+        sin recalcular la compresión.
+        """
+        if self.imagen_comprimida is None:
             return
 
-        carpeta = "imagenes"
-        if not os.path.exists(carpeta):
-            os.makedirs(carpeta)
+        # Si el umbral es la media, pasamos None; si es un valor fijo, lo pasamos
+        binaria, media, umbral_usado = aplicar_threshold(
+            self.imagen_comprimida, self.umbral_actual
+        )
+        self.imagen_binaria = binaria
 
-        contador = 1
-        while True:
-            nombre = f"imagen_final_{contador}.png"
-            ruta = os.path.join(carpeta, nombre)
-            if not os.path.exists(ruta):
-                break
-            contador += 1
+        self._mostrar(self._lbl_p2_bin, binaria, "p2_bin", ANCHO_P2, ALTO_P2)
+        self._lbl_info_bin.configure(
+            text=f"Umbral aplicado: {umbral_usado}   |   Media de la imagen: {media:.1f}"
+        )
+        self._lbl_media_ref.configure(
+            text=f"   |   Media de la imagen: {media:.1f}"
+        )
 
-        cv2.imwrite(ruta, self.imagen_binaria)
-        messagebox.showinfo("Guardado exitoso", f"Imagen guardada en:\n{ruta}")
+    # ═══════════════════════════════════════════════════════════════════════
+    # LÓGICA: Guardar imagen final
+    # ═══════════════════════════════════════════════════════════════════════
 
-    # ================================================================
-    # MÉTODOS AUXILIARES
-    # ================================================================
+    def _guardar_binaria(self):
+        if self.imagen_binaria is None:
+            messagebox.showwarning(
+                "Sin imagen",
+                "Genera primero la imagen binaria navegando a esta página\n"
+                "con una imagen ya normalizada."
+            )
+            return
 
-    def _mostrar_imagen(self, label, imagen_numpy, clave, ancho_max, alto_max):
-        """Convierte numpy → PhotoImage y lo muestra en el Label dado."""
+        os.makedirs("imagenes", exist_ok=True)
+
+        ruta = filedialog.asksaveasfilename(
+            title="Guardar imagen binaria",
+            initialdir="imagenes",
+            defaultextension=".png",
+            filetypes=[
+                ("PNG", "*.png"),
+                ("JPEG", "*.jpg"),
+                ("Todos", "*.*")
+            ]
+        )
+        if ruta:
+            cv2.imwrite(ruta, self.imagen_binaria)
+            messagebox.showinfo("Guardado", f"Imagen binaria guardada en:\n{ruta}")
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # HELPERS DE INTERFAZ
+    # ═══════════════════════════════════════════════════════════════════════
+
+    def _cuadro_imagen(self, contenedor, ancho, alto, texto=""):
+        """
+        Crea un frame de tamaño fijo con un Label para mostrar imágenes.
+        pack_propagate(False) garantiza que el frame NO se encoja aunque
+        la imagen sea más pequeña o aún no esté cargada.
+        Devuelve el Label para que el llamador pueda actualizarlo con .config().
+        """
+        marco = ctk.CTkFrame(
+            contenedor, width=ancho, height=alto,
+            fg_color=C_PLACEHOLDER,
+            corner_radius=4,
+            border_color=C_BORDE, border_width=1
+        )
+        marco.pack(pady=4, padx=8)
+        marco.pack_propagate(False)
+
+        lbl = tk.Label(
+            marco, text=texto,
+            bg=C_PLACEHOLDER, fg=C_SUBTITULO,
+            font=("Arial", 9, "italic"),
+            wraplength=ancho - 16,
+            anchor="center"
+        )
+        lbl.pack(expand=True)
+        return lbl
+
+    def _mostrar(self, label, imagen_numpy, clave, ancho_max, alto_max):
+        """
+        Convierte una imagen OpenCV (numpy) a PhotoImage de tkinter
+        y la asigna al Label. Guarda la referencia en self.refs para
+        evitar que el recolector de basura la elimine.
+        """
         if imagen_numpy is None:
             return
-        imagen_tk = convertir_imagen_para_tkinter(
-            imagen_numpy, ancho_maximo=ancho_max, alto_maximo=alto_max
-        )
-        self.referencias_imagenes_tk[clave] = imagen_tk
-        label.config(image=imagen_tk, text="")
+        img_tk = convertir_imagen_para_tkinter(imagen_numpy, ancho_max, alto_max)
+        if img_tk is None:
+            return
+        self.refs[clave] = img_tk
+        label.config(image=img_tk, text="")
 
-    def _actualizar_canal(self, widgets, canal, clave):
-        """Actualiza la imagen en grises y el histograma de un canal."""
-        # Imagen del canal (en escala de grises)
-        imagen_tk = convertir_imagen_para_tkinter(
-            canal, ancho_maximo=ANCHO_IMG_CANAL, alto_maximo=ALTO_IMG_CANAL
-        )
-        self.referencias_imagenes_tk[clave] = imagen_tk
-        widgets["label_imagen"].config(image=imagen_tk, text="")
+    def _estilizar_eje_hist(self, ax):
+        """Aplica el estilo oscuro a un eje de matplotlib para histogramas."""
+        ax.set_facecolor(C_DARK_AX)
+        ax.tick_params(labelsize=6, colors=C_TICK)
+        for sp in ax.spines.values():
+            sp.set_color(C_SPINE)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.set_xlim(0, 255)
 
-        # Histograma del canal
-        frecuencias = calcular_histograma(canal)
-        dibujar_histograma(widgets["eje"], frecuencias, widgets["color"])
-        widgets["canvas_histograma"].draw()
+    def _dibujar_histograma_normalizado(self, letra, frecuencias):
+        """
+        Dibuja el histograma del canal normalizado con eje Y FIJO.
+        El eje Y siempre va de 0 al máximo de los histogramas originales,
+        lo que permite observar visualmente cómo la normalización
+        redistribuye (estira o corta) la distribución de píxeles.
+        """
+        ax = self._ax_hist_norm[letra]
+        ax.clear()
+        self._estilizar_eje_hist(ax)
+
+        # Eje Y fijo: usamos el máximo de los histogramas originales × 1.05
+        ax.set_ylim(0, self.y_max_hist * 1.05)
+
+        ax.bar(range(256), frecuencias,
+               color=COLOR_CANAL[letra], width=1.0, alpha=0.85)
+        ax.grid(True, alpha=0.12, color="white", linewidth=0.5)
+
+        self._cv_hist_norm[letra].draw_idle()

@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip install *)",
+      "Bash(python -c ' *)",
+      "Bash(python -m py_compile interfaz/ventana.py)",
+      "Bash(python -m py_compile interfaz/curva_canal.py)"
+    ]
+  }
+}
