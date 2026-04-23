@@ -35,6 +35,12 @@ import cv2
 import numpy as np
 import tkinter as tk
 from tkinter import filedialog, messagebox
+import sys
+from pathlib import Path
+
+# Soporta ejecutar este archivo directamente (python interfaz/ventana.py)
+if __package__ is None or __package__ == "":
+    sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 import customtkinter as ctk
 from matplotlib.figure import Figure
@@ -74,15 +80,15 @@ NOMBRE_CANAL = {"R": "Canal R — Rojo", "G": "Canal G — Verde", "B": "Canal B
 
 # ── Tamaños  ───────────────────────────────────────────────────────────────
 # Columna izquierda (original + recombinada)
-ANCHO_ORIG = 245
-ALTO_ORIG  = 128
+ANCHO_ORIG = 320
+ALTO_ORIG  = 180
 
 # Cada canal: imagen + histograma lado a lado, compactos
-ANCHO_CH_IMG = 148   # imagen de canal
-ALTO_CH_IMG  =  98   # altura imagen
-# El histograma tiene exactamente el mismo tamaño para alinearse
-HIST_W_IN   = ANCHO_CH_IMG / 80   # pulgadas  (≈ 1.85")
-HIST_H_IN   = ALTO_CH_IMG  / 80   # pulgadas  (≈ 1.22")
+ANCHO_CH_IMG = 208   # imagen de canal
+ALTO_CH_IMG  = 132   # altura imagen
+# Histograma más grande y debajo de la imagen
+HIST_W_IN   = 3.35
+HIST_H_IN   = 1.95
 
 # Ancho del RangeSlider (aprox. 2 × ANCHO_CH_IMG)
 SLIDER_ANCHO = ANCHO_CH_IMG * 2 + 6   # ≈ 302 px
@@ -129,7 +135,6 @@ class VentanaPrincipal:
     # ═══════════════════════════════════════════════════════════════════════
 
     def _construir_ui(self):
-        self._construir_barra_nav()
         self._contenedor = ctk.CTkFrame(self.raiz, fg_color=C_FONDO)
         self._contenedor.pack(fill="both", expand=True)
         self._pagina1 = ctk.CTkScrollableFrame(self._contenedor, fg_color=C_FONDO)
@@ -172,8 +177,6 @@ class VentanaPrincipal:
     def _ir_pagina1(self):
         self._pagina2.pack_forget()
         self._pagina1.pack(fill="both", expand=True)
-        self._btn_nav1.configure(fg_color=C_AZUL)
-        self._btn_nav2.configure(fg_color=C_GRIS_BTN)
 
     def _ir_pagina2(self):
         if self.imagen_original is None:
@@ -182,8 +185,6 @@ class VentanaPrincipal:
             return
         self._pagina1.pack_forget()
         self._pagina2.pack(fill="both", expand=True)
-        self._btn_nav1.configure(fg_color=C_GRIS_BTN)
-        self._btn_nav2.configure(fg_color=C_AZUL)
         self._actualizar_pagina2()
 
     # ═══════════════════════════════════════════════════════════════════════
@@ -195,7 +196,7 @@ class VentanaPrincipal:
 
         ctk.CTkLabel(p,
                      text="Paso 1 de 2 — Normalización por Canal RGB",
-                     font=ctk.CTkFont(size=15, weight="bold"),
+                     font=ctk.CTkFont(size=19, weight="bold"),
                      text_color=C_TITULO).pack(pady=(10, 1))
 
         ctk.CTkLabel(p,
@@ -203,7 +204,7 @@ class VentanaPrincipal:
                          "Original arriba · Normalizado abajo.  "
                          "Arrastra el slider de cada canal para ajustar el rango."
                      ),
-                     font=ctk.CTkFont(size=10),
+                     font=ctk.CTkFont(size=12),
                      text_color=C_SUBTITULO).pack(pady=(0, 8))
 
         # ── Fila de 4 columnas ────────────────────────────────────────────
@@ -221,14 +222,14 @@ class VentanaPrincipal:
         ctk.CTkButton(fila_acciones,
                       text="↺  Reset Todo",
                       fg_color=C_GRIS_BTN, hover_color=C_GRIS_HOVER,
-                      font=ctk.CTkFont(size=11), height=30, width=160,
+                      font=ctk.CTkFont(size=12), height=36, width=180,
                       command=self._reset_todo).pack(side="left", padx=6)
 
         ctk.CTkButton(fila_acciones,
                       text="→  Siguiente: Comprimir y Binarizar",
                       fg_color=C_AZUL, hover_color=C_AZUL_HOVER,
-                      font=ctk.CTkFont(size=11, weight="bold"),
-                      height=30, width=280,
+                      font=ctk.CTkFont(size=12, weight="bold"),
+                      height=36, width=320,
                       command=self._ir_pagina2).pack(side="left", padx=6)
 
     # ── Columna izquierda: Original + Recombinada ────────────────────────
@@ -240,7 +241,7 @@ class VentanaPrincipal:
 
         # Imagen original (referencia fija)
         ctk.CTkLabel(col, text="Imagen Original",
-                     font=ctk.CTkFont(size=11, weight="bold"),
+                     font=ctk.CTkFont(size=13, weight="bold"),
                      text_color=C_TITULO).pack(pady=(8, 2))
         self._lbl_original = self._cuadro_imagen(col, ANCHO_ORIG, ALTO_ORIG,
                                                   "Carga\nuna imagen")
@@ -249,14 +250,16 @@ class VentanaPrincipal:
 
         # Imagen recombinada (resultado en tiempo real)
         ctk.CTkLabel(col, text="↓ Resultado Normalizado",
-                     font=ctk.CTkFont(size=11, weight="bold"),
+                     font=ctk.CTkFont(size=13, weight="bold"),
                      text_color="#22c55e").pack(pady=(0, 2))
         self._lbl_recombinada = self._cuadro_imagen(col, ANCHO_ORIG, ALTO_ORIG,
                                                      "Sin imagen\nnormalizada")
 
         ctk.CTkButton(col, text="📂  Cargar Imagen",
                       fg_color=C_AZUL, hover_color=C_AZUL_HOVER,
-                      height=32, command=self._cargar_imagen).pack(pady=(8, 10), padx=10)
+                      height=38, width=170,
+                      font=ctk.CTkFont(size=12, weight="bold"),
+                      command=self._cargar_imagen).pack(pady=(10, 12), padx=10)
 
     # ── Columna de canal (R / G / B) ─────────────────────────────────────
 
@@ -280,47 +283,27 @@ class VentanaPrincipal:
         col.pack(side="left", padx=5, pady=6, anchor="n")
 
         ctk.CTkLabel(col, text=NOMBRE_CANAL[letra],
-                     font=ctk.CTkFont(size=11, weight="bold"),
+                     font=ctk.CTkFont(size=13, weight="bold"),
                      text_color=color).pack(pady=(8, 2))
 
         # ── Banda ORIGINAL ────────────────────────────────────────────
         ctk.CTkLabel(col, text="ORIGINAL",
-                     font=ctk.CTkFont(size=9), text_color=C_SUBTITULO).pack()
+                     font=ctk.CTkFont(size=10, weight="bold"), text_color=C_SUBTITULO).pack()
 
         fila_orig = tk.Frame(col, bg=C_TARJETA)
-        fila_orig.pack(padx=8, pady=(2, 4))
+        fila_orig.pack(padx=10, pady=(3, 6))
 
         lbl_orig = self._cuadro_imagen_inline(fila_orig, ANCHO_CH_IMG, ALTO_CH_IMG, "—",
-                                              side="left")
+                                              side="top")
         self._lbl_orig_canal[letra] = lbl_orig
 
         fig_o, ax_o = self._nueva_figura_hist()
         cv_o = FigureCanvasTkAgg(fig_o, master=fila_orig)
-        cv_o.get_tk_widget().pack(side="left", padx=(3, 0))
+        cv_o.get_tk_widget().pack(side="top", pady=(6, 0))
         self._ax_hist_orig[letra] = ax_o
         self._cv_hist_orig[letra] = cv_o
 
-        # Separador
-        ctk.CTkFrame(col, height=1, fg_color=C_BORDE).pack(fill="x", padx=10, pady=4)
-
-        # ── Banda NORMALIZADO ─────────────────────────────────────────
-        ctk.CTkLabel(col, text="NORMALIZADO",
-                     font=ctk.CTkFont(size=9), text_color=color).pack()
-
-        fila_norm = tk.Frame(col, bg=C_TARJETA)
-        fila_norm.pack(padx=8, pady=(2, 4))
-
-        lbl_norm = self._cuadro_imagen_inline(fila_norm, ANCHO_CH_IMG, ALTO_CH_IMG, "—",
-                                               side="left")
-        self._lbl_norm_canal[letra] = lbl_norm
-
-        fig_n, ax_n = self._nueva_figura_hist()
-        cv_n = FigureCanvasTkAgg(fig_n, master=fila_norm)
-        cv_n.get_tk_widget().pack(side="left", padx=(3, 0))
-        self._ax_hist_norm[letra] = ax_n
-        self._cv_hist_norm[letra] = cv_n
-
-        # ── RangeSlider ───────────────────────────────────────────────
+        # ── RangeSlider (debajo de ORIGINAL) ─────────────────────────
         slider = RangeSlider(
             col,
             desde=0, hasta=255,
@@ -330,14 +313,34 @@ class VentanaPrincipal:
             color_fondo=C_TARJETA,
             callback=lambda vmin, vmax, l=letra: self._al_cambiar_slider(l, vmin, vmax)
         )
-        slider.pack(pady=(2, 4))
+        slider.pack(pady=(1, 8))
         self._sliders[letra] = slider
+
+        # Separador
+        ctk.CTkFrame(col, height=1, fg_color=C_BORDE).pack(fill="x", padx=10, pady=4)
+
+        # ── Banda NORMALIZADO ─────────────────────────────────────────
+        ctk.CTkLabel(col, text="NORMALIZADO",
+                     font=ctk.CTkFont(size=10, weight="bold"), text_color=color).pack()
+
+        fila_norm = tk.Frame(col, bg=C_TARJETA)
+        fila_norm.pack(padx=10, pady=(3, 6))
+
+        lbl_norm = self._cuadro_imagen_inline(fila_norm, ANCHO_CH_IMG, ALTO_CH_IMG, "—",
+                                               side="top")
+        self._lbl_norm_canal[letra] = lbl_norm
+
+        fig_n, ax_n = self._nueva_figura_hist()
+        cv_n = FigureCanvasTkAgg(fig_n, master=fila_norm)
+        cv_n.get_tk_widget().pack(side="top", pady=(6, 0))
+        self._ax_hist_norm[letra] = ax_n
+        self._cv_hist_norm[letra] = cv_n
 
         # Botón limpiar
         ctk.CTkButton(col, text=f"↺  Limpiar {letra}",
                       fg_color=C_GRIS_BTN, hover_color=C_GRIS_HOVER,
-                      height=26, width=110, font=ctk.CTkFont(size=10),
-                      command=lambda l=letra: self._reset_canal(l)).pack(pady=(0, 10))
+                      height=32, width=140, font=ctk.CTkFont(size=11),
+                      command=lambda l=letra: self._reset_canal(l)).pack(pady=(2, 12))
 
     # ═══════════════════════════════════════════════════════════════════════
     # PÁGINA 2 — Compresión y Binarización
@@ -657,13 +660,15 @@ class VentanaPrincipal:
         fig = Figure(figsize=(HIST_W_IN, HIST_H_IN), dpi=80, facecolor=C_DARK_AX)
         ax  = fig.add_subplot(111)
         ax.set_facecolor(C_DARK_AX)
-        ax.tick_params(labelsize=5, colors=C_TICK)
+        ax.tick_params(axis="x", labelsize=7, colors=C_TICK)
+        ax.tick_params(axis="y", labelsize=8, colors=C_TICK, pad=6)
         for sp in ax.spines.values():
             sp.set_color(C_SPINE)
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
         ax.set_xlim(0, 255)
-        fig.tight_layout(pad=0.2)
+        ax.ticklabel_format(axis="y", style="plain", useOffset=False)
+        fig.subplots_adjust(left=0.23, right=0.98, bottom=0.18, top=0.95)
         return fig, ax
 
     def _dibujar_hist(self, ax, canvas_mpl, frecuencias, color):
@@ -674,13 +679,15 @@ class VentanaPrincipal:
         """
         ax.clear()
         ax.set_facecolor(C_DARK_AX)
-        ax.tick_params(labelsize=5, colors=C_TICK)
+        ax.tick_params(axis="x", labelsize=7, colors=C_TICK)
+        ax.tick_params(axis="y", labelsize=8, colors=C_TICK, pad=6)
         for sp in ax.spines.values():
             sp.set_color(C_SPINE)
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
         ax.set_xlim(0, 255)
         ax.set_ylim(0, self.y_max_hist * 1.05)   # eje Y fijo y constante
+        ax.ticklabel_format(axis="y", style="plain", useOffset=False)
         ax.bar(range(256), frecuencias, color=color, width=1.0, alpha=0.85)
         ax.grid(True, alpha=0.10, color="white", linewidth=0.4)
         canvas_mpl.draw_idle()
