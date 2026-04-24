@@ -10,7 +10,7 @@ from interfaz.ventana import VentanaPrincipal
 
 def main():
     # Configurar el tema ANTES de crear cualquier widget CTk
-    ctk.set_appearance_mode("dark")
+    ctk.set_appearance_mode("light")
     ctk.set_default_color_theme("blue")
 
     raiz = ctk.CTk()

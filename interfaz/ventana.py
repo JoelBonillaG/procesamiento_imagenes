@@ -57,16 +57,16 @@ from procesamiento.threshold    import aplicar_threshold
 from interfaz.componentes import convertir_imagen_para_tkinter, RangeSlider
 
 
-# ── Paleta de colores ──────────────────────────────────────────────────────
-C_FONDO       = "#0f1117"
-C_TARJETA     = "#1a1d27"
-C_BORDE       = "#2d3152"
-C_TITULO      = "#e2e8f0"
-C_SUBTITULO   = "#8892a4"
-C_PLACEHOLDER = "#141720"
-C_DARK_AX     = "#141720"
-C_TICK        = "#5a6478"
-C_SPINE       = "#2d3152"
+# ── Paleta de colores (tema claro) ────────────────────────────────────────
+C_FONDO       = "#f1f5f9"
+C_TARJETA     = "#ffffff"
+C_BORDE       = "#e2e8f0"
+C_TITULO      = "#0f172a"
+C_SUBTITULO   = "#64748b"
+C_PLACEHOLDER = "#e8edf3"
+C_DARK_AX     = "#f8fafc"
+C_TICK        = "#475569"
+C_SPINE       = "#cbd5e1"
 
 C_AZUL        = "#3b82f6"
 C_AZUL_HOVER  = "#2563eb"
@@ -117,6 +117,7 @@ class VentanaPrincipal:
         self.umbral_actual      = 128
         self.bloque_actual      = 2
         self.refs               = {}     # previene GC de PhotoImage
+        self._hist_data         = {}     # (kind, letra) → np.array de frecuencias
 
         # ── Widgets de canal (se llenan en _construir_pagina1) ───────────
         self._lbl_orig_canal   = {}   # imagen original por canal (estática)
@@ -202,7 +203,7 @@ class VentanaPrincipal:
 
         # ── Fila de 4 columnas ────────────────────────────────────────────
         fila = ctk.CTkFrame(p, fg_color=C_FONDO)
-        fila.pack(fill="x", padx=8)
+        fila.pack(pady=4)
 
         self._construir_col_original(fila)
         for letra in ("R", "G", "B"):
@@ -292,7 +293,11 @@ class VentanaPrincipal:
 
         fig_o, ax_o = self._nueva_figura_hist()
         cv_o = FigureCanvasTkAgg(fig_o, master=fila_orig)
-        cv_o.get_tk_widget().pack(side="top", pady=(6, 0))
+        widget_o = cv_o.get_tk_widget()
+        widget_o.pack(side="top", pady=(6, 0))
+        widget_o.config(cursor="hand2")
+        widget_o.bind("<Button-1>",
+            lambda e, l=letra, k="orig": self._abrir_hist_grande(l, k))
         self._ax_hist_orig[letra] = ax_o
         self._cv_hist_orig[letra] = cv_o
 
@@ -326,7 +331,11 @@ class VentanaPrincipal:
 
         fig_n, ax_n = self._nueva_figura_hist()
         cv_n = FigureCanvasTkAgg(fig_n, master=fila_norm)
-        cv_n.get_tk_widget().pack(side="top", pady=(6, 0))
+        widget_n = cv_n.get_tk_widget()
+        widget_n.pack(side="top", pady=(6, 0))
+        widget_n.config(cursor="hand2")
+        widget_n.bind("<Button-1>",
+            lambda e, l=letra, k="norm": self._abrir_hist_grande(l, k))
         self._ax_hist_norm[letra] = ax_n
         self._cv_hist_norm[letra] = cv_n
 
@@ -355,7 +364,6 @@ class VentanaPrincipal:
         for titulo, attr, attr_dim in [
             ("Original Normalizada",           "_lbl_p2_orig", "_lbl_dim_orig"),
             ("Imagen Comprimida (grises)",      "_lbl_p2_comp", "_lbl_dim_comp"),
-            ("Imagen Binaria (Threshold)",      "_lbl_p2_bin",  "_lbl_info_bin"),
         ]:
             tarj = ctk.CTkFrame(fila_imgs, fg_color=C_TARJETA,
                                 corner_radius=10, border_color=C_BORDE, border_width=1)
@@ -370,6 +378,19 @@ class VentanaPrincipal:
                                     text_color=C_SUBTITULO)
             lbl_info.pack(pady=(2, 8))
             setattr(self, attr_dim, lbl_info)
+
+        # ── Tarjeta Imagen Binaria ────────────────────────────────────────
+        tarj_bin = ctk.CTkFrame(fila_imgs, fg_color=C_TARJETA,
+                                corner_radius=10, border_color=C_BORDE, border_width=1)
+        tarj_bin.pack(side="left", padx=6, pady=4)
+        ctk.CTkLabel(tarj_bin, text="Imagen Binaria (Threshold)",
+                     font=ctk.CTkFont(size=11, weight="bold"),
+                     text_color=C_TITULO).pack(pady=(8, 2))
+        self._lbl_p2_bin = self._cuadro_imagen(tarj_bin, ANCHO_P2, ALTO_P2, "—")
+        self._lbl_info_bin = ctk.CTkLabel(tarj_bin, text="",
+                                          font=ctk.CTkFont(size=10),
+                                          text_color=C_SUBTITULO)
+        self._lbl_info_bin.pack(pady=(2, 8))
 
 
         # ── Panel de controles ────────────────────────────────────────────
@@ -482,7 +503,8 @@ class VentanaPrincipal:
             self._dibujar_hist(self._ax_hist_orig[letra],
                                self._cv_hist_orig[letra],
                                hists_orig[letra],
-                               COLOR_CANAL[letra])
+                               COLOR_CANAL[letra],
+                               clave=("orig", letra))
 
             # Resetear slider silenciosamente (sin disparar callback)
             self._sliders[letra].set_valores(0, 255)
@@ -495,7 +517,8 @@ class VentanaPrincipal:
             self._dibujar_hist(self._ax_hist_norm[letra],
                                self._cv_hist_norm[letra],
                                hists_orig[letra],
-                               COLOR_CANAL[letra])
+                               COLOR_CANAL[letra],
+                               clave=("norm", letra))
 
         self._actualizar_recombinada()
 
@@ -521,7 +544,8 @@ class VentanaPrincipal:
         hist = calcular_histograma(canal_norm)
         self._dibujar_hist(self._ax_hist_norm[letra],
                            self._cv_hist_norm[letra],
-                           hist, COLOR_CANAL[letra])
+                           hist, COLOR_CANAL[letra],
+                           clave=("norm", letra))
 
     def _actualizar_recombinada(self):
         if any(v is None for v in self.canales_norm.values()):
@@ -635,7 +659,7 @@ class VentanaPrincipal:
         marco.pack_propagate(False)
         lbl = tk.Label(marco, text=texto,
                        bg=C_PLACEHOLDER, fg=C_SUBTITULO,
-                       font=("Arial", 8, "italic"),
+                       font=("Arial", 9, "italic"),
                        wraplength=ancho - 12, anchor="center")
         lbl.pack(expand=True)
         return lbl
@@ -649,7 +673,7 @@ class VentanaPrincipal:
         marco.pack_propagate(False)
         lbl = tk.Label(marco, text=texto,
                        bg=C_PLACEHOLDER, fg=C_SUBTITULO,
-                       font=("Arial", 7, "italic"),
+                       font=("Arial", 8, "italic"),
                        wraplength=ancho - 8, anchor="center")
         lbl.pack(expand=True)
         return lbl
@@ -682,12 +706,15 @@ class VentanaPrincipal:
         fig.subplots_adjust(left=0.23, right=0.98, bottom=0.18, top=0.95)
         return fig, ax
 
-    def _dibujar_hist(self, ax, canvas_mpl, frecuencias, color):
+    def _dibujar_hist(self, ax, canvas_mpl, frecuencias, color, clave=None):
         """
         Dibuja el histograma con eje Y FIJO (self.y_max_hist).
         Usar la misma escala en los 6 histogramas (3 orig + 3 norm)
         permite comparar visualmente la redistribución de píxeles.
+        Si se pasa clave, guarda los datos para el popup ampliado.
         """
+        if clave is not None:
+            self._hist_data[clave] = frecuencias
         ax.clear()
         ax.set_facecolor(C_DARK_AX)
         ax.tick_params(axis="x", labelsize=7, colors=C_TICK)
@@ -700,6 +727,55 @@ class VentanaPrincipal:
         ax.set_ylim(0, self.y_max_hist * 1.05)   # eje Y fijo y constante
         ax.ticklabel_format(axis="y", style="plain", useOffset=False)
         ax.bar(range(256), frecuencias, color=color, width=1.0, alpha=0.85)
-        ax.grid(True, alpha=0.10, color="white", linewidth=0.4)
+        ax.grid(True, alpha=0.15, color="#94a3b8", linewidth=0.4)
         canvas_mpl.draw_idle()
+
+    def _abrir_hist_grande(self, letra, kind):
+        """Abre una ventana modal con el histograma ampliado al hacer clic."""
+        clave = (kind, letra)
+        frecuencias = self._hist_data.get(clave)
+        if frecuencias is None:
+            return
+
+        titulo = f"Histograma — Canal {letra} ({'Original' if kind == 'orig' else 'Normalizado'})"
+        color  = COLOR_CANAL[letra]
+
+        popup = ctk.CTkToplevel(self.raiz)
+        popup.title(titulo)
+        popup.geometry("760x480")
+        popup.resizable(True, True)
+        popup.grab_set()
+        popup.configure(fg_color=C_FONDO)
+
+        ctk.CTkLabel(popup, text=titulo,
+                     font=ctk.CTkFont(size=14, weight="bold"),
+                     text_color=color).pack(pady=(12, 4))
+
+        fig = Figure(figsize=(8.5, 4.8), dpi=80, facecolor=C_DARK_AX)
+        ax  = fig.add_subplot(111)
+        ax.set_facecolor(C_DARK_AX)
+        ax.tick_params(axis="x", labelsize=10, colors=C_TICK)
+        ax.tick_params(axis="y", labelsize=10, colors=C_TICK, pad=8)
+        for sp in ax.spines.values():
+            sp.set_color(C_SPINE)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.set_xlim(0, 255)
+        ax.set_xlabel("Valor de píxel (0–255)", fontsize=10, color=C_SUBTITULO)
+        ax.set_ylabel("Frecuencia", fontsize=10, color=C_SUBTITULO)
+        y_max = float(frecuencias.max()) if frecuencias.max() > 0 else 1
+        ax.set_ylim(0, y_max * 1.08)
+        ax.ticklabel_format(axis="y", style="plain", useOffset=False)
+        ax.bar(range(256), frecuencias, color=color, width=1.0, alpha=0.85)
+        ax.grid(True, alpha=0.20, color="#94a3b8", linewidth=0.5)
+        fig.subplots_adjust(left=0.10, right=0.97, bottom=0.12, top=0.95)
+
+        cv = FigureCanvasTkAgg(fig, master=popup)
+        cv.draw()
+        cv.get_tk_widget().pack(fill="both", expand=True, padx=12, pady=(0, 4))
+
+        ctk.CTkButton(popup, text="Cerrar",
+                      fg_color=C_GRIS_BTN, hover_color=C_GRIS_HOVER,
+                      width=100, height=32,
+                      command=popup.destroy).pack(pady=(4, 12))
 

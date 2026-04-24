@@ -9,9 +9,9 @@ import tkinter as tk
 import cv2
 from PIL import Image, ImageTk
 
-# Colores del tema oscuro usados en el RangeSlider
-_TRACK_COLOR = "#2d3152"   # pista inactiva
-_BG_COLOR    = "#1a1d27"   # fondo del canvas
+# Colores del tema claro usados en el RangeSlider
+_TRACK_COLOR = "#cbd5e1"   # pista inactiva
+_BG_COLOR    = "#ffffff"   # fondo del canvas
 
 
 class RangeSlider(tk.Frame):
@@ -47,7 +47,7 @@ class RangeSlider(tk.Frame):
         # Etiqueta con los valores actuales
         self.label_valores = tk.Label(
             self, text=self._texto_valores(),
-            bg=color_fondo, fg="#8892a4",
+            bg=color_fondo, fg="#475569",
             font=("Consolas", 8)
         )
         self.label_valores.pack()
@@ -103,12 +103,12 @@ class RangeSlider(tk.Frame):
         # Thumb mínimo
         self.canvas.create_oval(
             x_mn - r, y - r, x_mn + r, y + r,
-            fill=self.color_activo, outline="#0f1117", width=2
+            fill=self.color_activo, outline="#ffffff", width=2
         )
         # Thumb máximo
         self.canvas.create_oval(
             x_mx - r, y - r, x_mx + r, y + r,
-            fill=self.color_activo, outline="#0f1117", width=2
+            fill=self.color_activo, outline="#ffffff", width=2
         )
         self.label_valores.config(text=self._texto_valores())
 
