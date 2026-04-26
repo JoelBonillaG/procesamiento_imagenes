@@ -1,4 +1,6 @@
 imagenes/
+ven
+venv
 
 # LaTeX build files
 *.aux
