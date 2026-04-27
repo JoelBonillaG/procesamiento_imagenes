@@ -48,8 +48,8 @@
     \textbf{Carrera:}\hspace{1cm} \= Ingeniería de Software \\[0.25em]
     \textbf{Unidad de Organización Curricular:} \hspace{1cm} \= PROFESIONAL \\[0.25em]
     \textbf{Nivel y Paralelo:} \> Séptimo semestre A \\[0.25em]
-    \textbf{Alumnos participantes:} \> Bonilla Joel \\
-    \> Garcia Josue \\[0.25em]
+    \textbf{Alumnos participantes:} \> Bonilla Guerrero Fernando Joel \\
+    \> García Abata Josué Joel \\[0.25em]
     \textbf{Asignatura:} \> Gestión de Proyectos \\[0.25em]
     \textbf{Docente:} \> Ing. Rubén Nogales, Mg.
 \end{tabbing}
@@ -97,8 +97,6 @@ Listado de equipos y materiales generales empleados en la guía práctica:
     \item Imagen de prueba relacionada con una retina.
     \item Herramienta de procesamiento de imágenes.
     \item Internet.
-    \item Material disponible en el aula virtual de la asignatura.
-    \item Herramientas que permitan generar documentos en formato PDF.
 \end{itemize}
 
 \textbf{TAC (Tecnologías para el Aprendizaje y Conocimiento) empleados en la guía práctica:}
@@ -110,6 +108,39 @@ $\square$ Recursos audiovisuales \\
 $\square$ Gamificación \\
 $\square$ Inteligencia Artificial \\
 Otros (Especifique): \underline{\hspace{5cm}}
+
+\subsubsection{Librerías utilizadas}
+Las siguientes librerías externas de Python fueron empleadas en el desarrollo de la aplicación:
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{|l|l|p{7cm}|}
+        \hline
+        \textbf{Librería}      & \textbf{Versión mínima} & \textbf{Propósito}                                                               \\
+        \hline
+        \texttt{numpy}         & 1.24                    & Operaciones matriciales y manipulación de arreglos de píxeles.                   \\
+        \hline
+        \texttt{opencv-python} & 4.7                     & Lectura de imágenes, conversión de espacios de color y procesamiento de canales. \\
+        \hline
+        \texttt{Pillow}        & 9.0                     & Conversión de imágenes para su visualización en la interfaz gráfica.             \\
+        \hline
+        \texttt{matplotlib}    & 3.6                     & Generación de histogramas por canal y figuras embebidas en la interfaz.          \\
+        \hline
+        \texttt{customtkinter} & 5.0                     & Construcción de la interfaz gráfica con componentes modernos sobre Tkinter.      \\
+        \hline
+    \end{tabular}
+    \caption{Librerías externas utilizadas en la aplicación.}
+\end{table}
+
+\subsubsection{Acceso a la aplicación}
+Para ejecutar la aplicación, se requiere Python 3.10 o superior con las librerías listadas instaladas. El punto de entrada es el archivo \texttt{app.py}, ubicado en la raíz del proyecto. Los pasos son los siguientes:
+
+\begin{enumerate}
+    \item Instalar las dependencias ejecutando en terminal:\\
+          \texttt{pip install numpy opencv-python Pillow matplotlib customtkinter}
+    \item Ejecutar la aplicación:\\
+          \texttt{python app.py}
+\end{enumerate}
 
 \subsection{Actividades por desarrollar}
 \begin{enumerate}
@@ -277,7 +308,7 @@ Tras haber mejorado la visualización mediante la normalización y comprendido e
     I_{gris} = 0.299 \cdot R + 0.587 \cdot G + 0.114 \cdot B
     \label{eq:grises}
 \end{equation}
-El resultado descarta el color y conserva la información de brillo, lo que facilita la observación de zonas claras y oscuras, bordes y manchas presentes en la imagen \cite{b2}. Sobre esta representación se aplica además una compresión por bloques, que agrupa los píxeles en regiones de tamaño $N \times N$ y las reemplaza por su valor promedio, reduciendo la cantidad total de datos mientras se mantienen los rasgos generales de la retina.
+El resultado descarta el color y conserva la información de brillo, lo que facilita la observación de zonas claras y oscuras, bordes y manchas presentes en la imagen \cite{b2}. En esta representación, los exudados duros aparecen como regiones de alta intensidad (blancas o muy claras), dado que son depósitos lipídicos que reflejan la luz con mayor intensidad que el tejido circundante. Los vasos sanguíneos, en cambio, absorben mayor cantidad de luz y presentan menor reflectancia, por lo que se representan como estructuras oscuras sobre el tejido de fondo. Sobre esta representación se aplica además una compresión por bloques, que agrupa los píxeles en regiones de tamaño $N \times N$ y las reemplaza por su valor promedio, reduciendo la cantidad total de datos mientras se mantienen los rasgos generales de la retina.
 
 \textbf{Imagen binaria.} Transforma la imagen en escala de grises en una representación con solo dos valores principales, blanco y negro, aplicando un umbral $T$: los píxeles con intensidad mayor o igual al umbral se convierten en blanco y el resto en negro. Esta representación aporta una separación directa entre regiones claras y oscuras, lo que permite aislar zonas de mayor brillo asociadas a los exudados. Su principal limitación consiste en que depende por completo del umbral seleccionado, de modo que un valor mal ajustado puede producir falsos positivos, incluir ruido o eliminar detalles relevantes \cite{b4}.
 
@@ -388,7 +419,16 @@ Para complementar la comparación, la Figura~\ref{fig:exudados_marcados_gris_bin
     \label{fig:exudados_marcados_gris_binaria}
 \end{figure}
 
-En la imagen binaria, aunque la información visual queda reducida a únicamente dos valores, los exudados aparecen como pequeñas regiones blancas identificables sobre el fondo oscuro. La utilidad de esta observación radica en que, al ser una representación simplificada, la imagen binaria facilita la extracción automática de regiones de interés, permite aplicar operaciones morfológicas posteriores y puede servir como entrada directa para procesos de segmentación, conteo de estructuras o clasificación, sin necesidad de volver a procesar la información de color original.
+En la imagen binaria, aunque la información visual queda reducida a únicamente dos valores, los exudados aparecen como pequeñas regiones identificables. La utilidad de esta observación radica en que, al ser una representación simplificada, la imagen binaria facilita la extracción automática de regiones de interés, permite aplicar operaciones morfológicas posteriores y puede servir como entrada directa para procesos de segmentación, conteo de estructuras o clasificación, sin necesidad de volver a procesar la información de color original.
+
+Como observación adicional, al elevar el umbral de binarización a $T = 195$ se obtiene una segmentación más selectiva que permite identificar con mayor precisión las regiones de mayor intensidad asociadas a los exudados. Con este valor, la mayor parte del tejido retinal queda clasificada como negro, dejando en blanco únicamente las zonas con brillo elevado, lo que reduce el ruido visual y resalta con mayor claridad los posibles exudados respecto a los resultados obtenidos con umbrales más bajos.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.55\textwidth]{picture/retina_correcion/binaria_195.png}
+    \caption{Imagen binaria con $T = 195$: los exudados se destacan con mayor claridad al reducirse las regiones de brillo intermedio.}
+    \label{fig:binaria_195}
+\end{figure}
 
 El procesamiento aplicado permitió mejorar la visualización de detalles que no eran evidentes en la imagen original, haciendo visibles los exudados presentes en el tejido retinal y facilitando su localización en la imagen normalizada, en la versión en escala de grises y en la representación binaria.
 
