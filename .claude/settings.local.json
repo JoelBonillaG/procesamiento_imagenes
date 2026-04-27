@@ -5,7 +5,9 @@
       "Bash(python -c ' *)",
       "Bash(python -m py_compile interfaz/ventana.py)",
       "Bash(python -m py_compile interfaz/curva_canal.py)",
-      "Bash(pdflatex -interaction=nonstopmode -halt-on-error Informe_Imagenes.tex)"
+      "Bash(pdflatex -interaction=nonstopmode -halt-on-error Informe_Imagenes.tex)",
+      "Bash(python _strip_comments.py)",
+      "Bash(python -m py_compile app.py procesamiento/canales.py procesamiento/histograma.py procesamiento/redistribuir.py procesamiento/threshold.py procesamiento/compresion.py interfaz/componentes.py interfaz/curva_canal.py interfaz/ventana.py)"
     ]
   }
 }

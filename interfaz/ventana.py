@@ -1,34 +1,3 @@
-# ============================================================
-# Módulo: ventana.py
-# ============================================================
-# Ventana principal — tema oscuro con customtkinter.
-#
-# PÁGINA 1 — Normalización por Canal RGB
-# ────────────────────────────────────────────────────────────
-# Columna izquierda:
-#   ┌─────────────────────┐
-#   │  Imagen Original    │  ← estática (referencia)
-#   │─────────────────────│
-#   │  Resultado Normaliz │  ← se actualiza en tiempo real
-#   │  [Cargar Imagen]    │
-#   └─────────────────────┘
-#
-# Columnas R / G / B:
-#   ┌─────────────────────────┐
-#   │  Canal X  (título)      │
-#   │  [img orig] [hist orig] │  ← estático
-#   │─────────────────────────│
-#   │  [img norm] [hist norm] │  ← actualiza en tiempo real
-#   │  ○───────────────────○  │  ← RangeSlider min/max
-#   │  Min: X   Max: Y        │
-#   │  [Limpiar]              │
-#   └─────────────────────────┘
-#
-# Todo el contenido cabe en pantalla sin scroll.
-#
-# PÁGINA 2 — Compresión y Binarización
-# ────────────────────────────────────────────────────────────
-#   Tres imágenes + controles (bloque, umbral) + guardar.
 
 import os
 import cv2
@@ -38,7 +7,6 @@ from tkinter import filedialog, messagebox
 import sys
 from pathlib import Path
 
-# Soporta ejecutar este archivo directamente (python interfaz/ventana.py)
 if __package__ is None or __package__ == "":
     sys.path.append(str(Path(__file__).resolve().parents[1]))
 
@@ -46,18 +14,14 @@ import customtkinter as ctk
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
-# Procesamiento de imagen
 from procesamiento.canales      import separar_canales, unir_canales
 from procesamiento.histograma   import calcular_histograma
 from procesamiento.redistribuir import normalizar_canal
 from procesamiento.compresion   import convertir_a_grises, comprimir_por_bloques
 from procesamiento.threshold    import aplicar_threshold
 
-# Componentes de interfaz
 from interfaz.componentes import convertir_imagen_para_tkinter, RangeSlider
 
-
-# ── Paleta de colores (tema claro) ────────────────────────────────────────
 C_FONDO       = "#f1f5f9"
 C_TARJETA     = "#ffffff"
 C_BORDE       = "#e2e8f0"
@@ -78,62 +42,47 @@ C_GRIS_HOVER  = "#4b5563"
 COLOR_CANAL  = {"R": "#ef4444", "G": "#22c55e", "B": "#3b82f6"}
 NOMBRE_CANAL = {"R": "Canal R — Rojo", "G": "Canal G — Verde", "B": "Canal B — Azul"}
 
-# ── Tamaños  ───────────────────────────────────────────────────────────────
-# Columna izquierda (original + recombinada)
 ANCHO_ORIG = 320
 ALTO_ORIG  = 180
 
-# Cada canal: imagen + histograma lado a lado, compactos
-ANCHO_CH_IMG = 208   # imagen de canal
-ALTO_CH_IMG  = 132   # altura imagen
-# Histograma más grande y debajo de la imagen
+ANCHO_CH_IMG = 208
+ALTO_CH_IMG  = 132
 HIST_W_IN   = 3.35
 HIST_H_IN   = 1.95
 
-# Ancho del RangeSlider (aprox. 2 × ANCHO_CH_IMG)
-SLIDER_ANCHO = ANCHO_CH_IMG * 2 + 6   # ≈ 302 px
+SLIDER_ANCHO = ANCHO_CH_IMG * 2 + 6
 
-# Página 2
 ANCHO_P2 = 400
 ALTO_P2  = 295
 
-
-# ============================================================
 class VentanaPrincipal:
-    """Controlador principal de la interfaz."""
 
     def __init__(self, raiz):
         self.raiz = raiz
         self.raiz.configure(bg=C_FONDO)
 
-        # ── Estado ──────────────────────────────────────────────────────
         self.imagen_original    = None
         self.canales_orig       = {"R": None, "G": None, "B": None}
         self.canales_norm       = {"R": None, "G": None, "B": None}
         self.imagen_recombinada = None
         self.imagen_comprimida  = None
         self.imagen_binaria     = None
-        self.y_max_hist         = 1      # escala Y fija para histogramas
+        self.y_max_hist         = 1
         self.umbral_actual      = 128
         self.bloque_actual      = 2
-        self.refs               = {}     # previene GC de PhotoImage
-        self._hist_data         = {}     # (kind, letra) → np.array de frecuencias
+        self.refs               = {}
+        self._hist_data         = {}
 
-        # ── Widgets de canal (se llenan en _construir_pagina1) ───────────
-        self._lbl_orig_canal   = {}   # imagen original por canal (estática)
-        self._ax_hist_orig     = {}   # histograma original (estático)
+        self._lbl_orig_canal   = {}
+        self._ax_hist_orig     = {}
         self._cv_hist_orig     = {}
-        self._lbl_norm_canal   = {}   # imagen normalizada por canal (dinámica)
-        self._ax_hist_norm     = {}   # histograma normalizado (dinámico, Y fijo)
+        self._lbl_norm_canal   = {}
+        self._ax_hist_norm     = {}
         self._cv_hist_norm     = {}
-        self._sliders          = {}   # RangeSlider por canal
-        self._lbl_minmax       = {}   # etiqueta Min/Max
+        self._sliders          = {}
+        self._lbl_minmax       = {}
 
         self._construir_ui()
-
-    # ═══════════════════════════════════════════════════════════════════════
-    # CONSTRUCCIÓN
-    # ═══════════════════════════════════════════════════════════════════════
 
     def _construir_ui(self):
         self._contenedor = ctk.CTkFrame(self.raiz, fg_color=C_FONDO)
@@ -143,8 +92,6 @@ class VentanaPrincipal:
         self._construir_pagina1()
         self._construir_pagina2()
         self._ir_pagina1()
-
-    # ── Barra de navegación ──────────────────────────────────────────────
 
     def _construir_barra_nav(self):
         barra = ctk.CTkFrame(self.raiz, fg_color=C_TARJETA, height=46, corner_radius=0)
@@ -173,8 +120,6 @@ class VentanaPrincipal:
                                         command=self._ir_pagina2)
         self._btn_nav2.pack(side="left")
 
-    # ── Navegación ───────────────────────────────────────────────────────
-
     def _ir_pagina1(self):
         self._pagina2.pack_forget()
         self._pagina1.pack(fill="both", expand=True)
@@ -188,10 +133,6 @@ class VentanaPrincipal:
         self._pagina2.pack(fill="both", expand=True)
         self._actualizar_pagina2()
 
-    # ═══════════════════════════════════════════════════════════════════════
-    # PÁGINA 1 — Normalización
-    # ═══════════════════════════════════════════════════════════════════════
-
     def _construir_pagina1(self):
         p = self._pagina1
 
@@ -200,8 +141,6 @@ class VentanaPrincipal:
                      font=ctk.CTkFont(size=19, weight="bold"),
                      text_color=C_TITULO).pack(pady=(10, 1))
 
-
-        # ── Fila de 4 columnas ────────────────────────────────────────────
         fila = ctk.CTkFrame(p, fg_color=C_FONDO)
         fila.pack(pady=4)
 
@@ -209,7 +148,6 @@ class VentanaPrincipal:
         for letra in ("R", "G", "B"):
             self._construir_col_canal(fila, letra)
 
-        # ── Botones de acción ────────────────────────────────────────────
         fila_acciones = ctk.CTkFrame(p, fg_color=C_FONDO)
         fila_acciones.pack(pady=10)
 
@@ -226,8 +164,6 @@ class VentanaPrincipal:
                       height=36, width=320,
                       command=self._ir_pagina2).pack(side="left", padx=6)
 
-    # ── Columna izquierda: Original + Recombinada ────────────────────────
-
     def _construir_col_original(self, contenedor):
         col = ctk.CTkFrame(contenedor, fg_color=C_TARJETA,
                            corner_radius=10, border_color=C_BORDE, border_width=1)
@@ -241,7 +177,6 @@ class VentanaPrincipal:
 
         ctk.CTkFrame(col, height=1, fg_color=C_BORDE).pack(fill="x", padx=10, pady=5)
 
-        # Imagen recombinada (resultado en tiempo real)
         ctk.CTkLabel(col, text="↓ Resultado Normalizado",
                      font=ctk.CTkFont(size=13, weight="bold"),
                      text_color="#22c55e").pack(pady=(0, 2))
@@ -254,22 +189,7 @@ class VentanaPrincipal:
                       font=ctk.CTkFont(size=12, weight="bold"),
                       command=self._cargar_imagen).pack(pady=(10, 12), padx=10)
 
-    # ── Columna de canal (R / G / B) ─────────────────────────────────────
-
     def _construir_col_canal(self, contenedor, letra):
-        """
-        Estructura de la columna:
-            Título del canal
-            ──────────────────────────────
-            ORIGINAL (estático)
-              [imagen gris orig] [hist orig]
-            ──────────────────────────────
-            NORMALIZADO (tiempo real)
-              [imagen gris norm] [hist norm]
-              ○────────────────────────────○   ← RangeSlider
-              Min: X   Max: Y
-            [Limpiar]
-        """
         color = COLOR_CANAL[letra]
         col   = ctk.CTkFrame(contenedor, fg_color=C_TARJETA,
                               corner_radius=10, border_color=C_BORDE, border_width=1)
@@ -279,10 +199,8 @@ class VentanaPrincipal:
                      font=ctk.CTkFont(size=13, weight="bold"),
                      text_color=color).pack(pady=(8, 2))
 
-        # ── Banda ORIGINAL ────────────────────────────────────────────
         ctk.CTkLabel(col, text="ORIGINAL",
                      font=ctk.CTkFont(size=10, weight="bold"), text_color=C_SUBTITULO).pack()
-
 
         fila_orig = tk.Frame(col, bg=C_TARJETA)
         fila_orig.pack(padx=10, pady=(3, 6))
@@ -301,7 +219,6 @@ class VentanaPrincipal:
         self._ax_hist_orig[letra] = ax_o
         self._cv_hist_orig[letra] = cv_o
 
-        # ── RangeSlider (debajo de ORIGINAL) ─────────────────────────
         slider = RangeSlider(
             col,
             desde=0, hasta=255,
@@ -314,13 +231,10 @@ class VentanaPrincipal:
         slider.pack(pady=(1, 8))
         self._sliders[letra] = slider
 
-        # Separador
         ctk.CTkFrame(col, height=1, fg_color=C_BORDE).pack(fill="x", padx=10, pady=4)
 
-        # ── Banda NORMALIZADO ─────────────────────────────────────────
         ctk.CTkLabel(col, text="NORMALIZADO",
                      font=ctk.CTkFont(size=10, weight="bold"), text_color=color).pack()
-
 
         fila_norm = tk.Frame(col, bg=C_TARJETA)
         fila_norm.pack(padx=10, pady=(3, 6))
@@ -339,15 +253,10 @@ class VentanaPrincipal:
         self._ax_hist_norm[letra] = ax_n
         self._cv_hist_norm[letra] = cv_n
 
-        # Botón limpiar
         ctk.CTkButton(col, text=f"↺  Limpiar {letra}",
                       fg_color=C_GRIS_BTN, hover_color=C_GRIS_HOVER,
                       height=32, width=140, font=ctk.CTkFont(size=11),
                       command=lambda l=letra: self._reset_canal(l)).pack(pady=(2, 12))
-
-    # ═══════════════════════════════════════════════════════════════════════
-    # PÁGINA 2 — Compresión y Binarización
-    # ═══════════════════════════════════════════════════════════════════════
 
     def _construir_pagina2(self):
         p = self._pagina2
@@ -357,7 +266,6 @@ class VentanaPrincipal:
                      font=ctk.CTkFont(size=15, weight="bold"),
                      text_color=C_TITULO).pack(pady=(14, 2))
 
-        # ── Tres imágenes ─────────────────────────────────────────────────
         fila_imgs = ctk.CTkFrame(p, fg_color=C_FONDO)
         fila_imgs.pack(pady=4, padx=10)
 
@@ -379,7 +287,6 @@ class VentanaPrincipal:
             lbl_info.pack(pady=(2, 8))
             setattr(self, attr_dim, lbl_info)
 
-        # ── Tarjeta Imagen Binaria ────────────────────────────────────────
         tarj_bin = ctk.CTkFrame(fila_imgs, fg_color=C_TARJETA,
                                 corner_radius=10, border_color=C_BORDE, border_width=1)
         tarj_bin.pack(side="left", padx=6, pady=4)
@@ -392,8 +299,6 @@ class VentanaPrincipal:
                                           text_color=C_SUBTITULO)
         self._lbl_info_bin.pack(pady=(2, 8))
 
-
-        # ── Panel de controles ────────────────────────────────────────────
         panel = ctk.CTkFrame(p, fg_color=C_TARJETA,
                               corner_radius=10, border_color=C_BORDE, border_width=1)
         panel.pack(fill="x", padx=18, pady=12)
@@ -403,7 +308,6 @@ class VentanaPrincipal:
                      text_color=C_TITULO).pack(anchor="w", padx=14, pady=(10, 4))
         ctk.CTkFrame(panel, height=1, fg_color=C_BORDE).pack(fill="x", padx=14)
 
-        # Tamaño de bloque
         sb = ctk.CTkFrame(panel, fg_color=C_TARJETA)
         sb.pack(anchor="w", padx=14, pady=(8, 4))
         ctk.CTkLabel(sb, text="Tamaño de bloque (promedio NxN, reduce resolución):",
@@ -423,7 +327,6 @@ class VentanaPrincipal:
 
         ctk.CTkFrame(panel, height=1, fg_color=C_BORDE).pack(fill="x", padx=14, pady=6)
 
-        # Umbral
         su = ctk.CTkFrame(panel, fg_color=C_TARJETA)
         su.pack(fill="x", padx=14, pady=(0, 10))
 
@@ -454,7 +357,6 @@ class VentanaPrincipal:
         ctk.CTkLabel(su, text="pixel ≥ umbral → 255 (blanco)   |   pixel < umbral → 0 (negro)",
                      font=ctk.CTkFont(size=9), text_color=C_SUBTITULO).pack(anchor="w", pady=(4, 0))
 
-        # ── Navegación ────────────────────────────────────────────────────
         fila_nav = ctk.CTkFrame(p, fg_color=C_FONDO)
         fila_nav.pack(fill="x", padx=18, pady=(6, 18))
         ctk.CTkButton(fila_nav, text="← Volver",
@@ -463,10 +365,6 @@ class VentanaPrincipal:
         ctk.CTkButton(fila_nav, text="💾  Guardar Imagen Binaria",
                       fg_color=C_VERDE, hover_color=C_VERDE_HOVER, height=34,
                       command=self._guardar_binaria).pack(side="right")
-
-    # ═══════════════════════════════════════════════════════════════════════
-    # LÓGICA: Carga de imagen
-    # ═══════════════════════════════════════════════════════════════════════
 
     def _cargar_imagen(self):
         ruta = filedialog.askopenfilename(
@@ -485,31 +383,25 @@ class VentanaPrincipal:
         r, g, b = separar_canales(img)
         self.canales_orig = {"R": r, "G": g, "B": b}
 
-        # Histogramas originales + escala Y fija para TODOS los histogramas
         hists_orig = {l: calcular_histograma(self.canales_orig[l]) for l in "RGB"}
         self.y_max_hist = max(h.max() for h in hists_orig.values())
         if self.y_max_hist < 1:
             self.y_max_hist = 1
 
-        # Mostrar imagen original y los histogramas/imágenes originales (estáticos)
         self._mostrar(self._lbl_original, img, "orig", ANCHO_ORIG, ALTO_ORIG)
 
         for letra in "RGB":
-            # Imagen original del canal
             self._mostrar(self._lbl_orig_canal[letra],
                           self.canales_orig[letra],
                           f"orig_ch_{letra}", ANCHO_CH_IMG, ALTO_CH_IMG)
-            # Histograma original (estático, se dibuja una sola vez)
             self._dibujar_hist(self._ax_hist_orig[letra],
                                self._cv_hist_orig[letra],
                                hists_orig[letra],
                                COLOR_CANAL[letra],
                                clave=("orig", letra))
 
-            # Resetear slider silenciosamente (sin disparar callback)
             self._sliders[letra].set_valores(0, 255)
 
-            # Canal normalizado = copia del original (min=0, max=255 es identidad)
             self.canales_norm[letra] = self.canales_orig[letra].copy()
             self._mostrar(self._lbl_norm_canal[letra],
                           self.canales_norm[letra],
@@ -522,19 +414,13 @@ class VentanaPrincipal:
 
         self._actualizar_recombinada()
 
-    # ═══════════════════════════════════════════════════════════════════════
-    # LÓGICA: Normalización en tiempo real
-    # ═══════════════════════════════════════════════════════════════════════
-
     def _al_cambiar_slider(self, letra, vmin, vmax):
-        """Callback del RangeSlider: normaliza el canal y actualiza vistas."""
         if self.imagen_original is None:
             return
         self._normalizar_canal(letra, vmin, vmax)
         self._actualizar_recombinada()
 
     def _normalizar_canal(self, letra, vmin, vmax):
-        """Aplica normalización y refresca imagen + histograma normalizado."""
         canal_norm = normalizar_canal(self.canales_orig[letra], vmin, vmax)
         self.canales_norm[letra] = canal_norm
 
@@ -556,8 +442,6 @@ class VentanaPrincipal:
         self._mostrar(self._lbl_recombinada, self.imagen_recombinada,
                       "recomb", ANCHO_ORIG, ALTO_ORIG)
 
-    # ── Resets ───────────────────────────────────────────────────────────
-
     def _reset_canal(self, letra):
         self._sliders[letra].set_valores(0, 255)
         if self.imagen_original is not None:
@@ -567,10 +451,6 @@ class VentanaPrincipal:
     def _reset_todo(self):
         for letra in "RGB":
             self._reset_canal(letra)
-
-    # ═══════════════════════════════════════════════════════════════════════
-    # LÓGICA: Página 2
-    # ═══════════════════════════════════════════════════════════════════════
 
     def _actualizar_pagina2(self):
         if self.imagen_recombinada is None:
@@ -646,12 +526,7 @@ class VentanaPrincipal:
             cv2.imwrite(ruta, self.imagen_binaria)
             messagebox.showinfo("Guardado", f"Imagen guardada en:\n{ruta}")
 
-    # ═══════════════════════════════════════════════════════════════════════
-    # HELPERS DE INTERFAZ
-    # ═══════════════════════════════════════════════════════════════════════
-
     def _cuadro_imagen(self, contenedor, ancho, alto, texto=""):
-        """Frame fijo con Label para imágenes. Empaqueta con pack()."""
         marco = ctk.CTkFrame(contenedor, width=ancho, height=alto,
                               fg_color=C_PLACEHOLDER, corner_radius=4,
                               border_color=C_BORDE, border_width=1)
@@ -665,7 +540,6 @@ class VentanaPrincipal:
         return lbl
 
     def _cuadro_imagen_inline(self, contenedor, ancho, alto, texto="", side="left"):
-        """Frame fijo empaquetado con pack(side=side) para layout horizontal."""
         marco = ctk.CTkFrame(contenedor, width=ancho, height=alto,
                               fg_color=C_PLACEHOLDER, corner_radius=4,
                               border_color=C_BORDE, border_width=1)
@@ -679,7 +553,6 @@ class VentanaPrincipal:
         return lbl
 
     def _mostrar(self, label, imagen_numpy, clave, ancho_max, alto_max, expandir=False):
-        """Convierte numpy → PhotoImage y lo asigna al Label."""
         if imagen_numpy is None:
             return
         img_tk = convertir_imagen_para_tkinter(
@@ -691,7 +564,6 @@ class VentanaPrincipal:
         label.config(image=img_tk, text="")
 
     def _nueva_figura_hist(self):
-        """Crea una figura matplotlib oscura del tamaño de las imágenes de canal."""
         fig = Figure(figsize=(HIST_W_IN, HIST_H_IN), dpi=80, facecolor=C_DARK_AX)
         ax  = fig.add_subplot(111)
         ax.set_facecolor(C_DARK_AX)
@@ -707,12 +579,6 @@ class VentanaPrincipal:
         return fig, ax
 
     def _dibujar_hist(self, ax, canvas_mpl, frecuencias, color, clave=None):
-        """
-        Dibuja el histograma con eje Y FIJO (self.y_max_hist).
-        Usar la misma escala en los 6 histogramas (3 orig + 3 norm)
-        permite comparar visualmente la redistribución de píxeles.
-        Si se pasa clave, guarda los datos para el popup ampliado.
-        """
         if clave is not None:
             self._hist_data[clave] = frecuencias
         ax.clear()
@@ -724,14 +590,13 @@ class VentanaPrincipal:
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
         ax.set_xlim(0, 255)
-        ax.set_ylim(0, self.y_max_hist * 1.05)   # eje Y fijo y constante
+        ax.set_ylim(0, self.y_max_hist * 1.05)
         ax.ticklabel_format(axis="y", style="plain", useOffset=False)
         ax.bar(range(256), frecuencias, color=color, width=1.0, alpha=0.85)
         ax.grid(True, alpha=0.15, color="#94a3b8", linewidth=0.4)
         canvas_mpl.draw_idle()
 
     def _abrir_hist_grande(self, letra, kind):
-        """Abre una ventana modal con el histograma ampliado al hacer clic."""
         clave = (kind, letra)
         frecuencias = self._hist_data.get(clave)
         if frecuencias is None:
